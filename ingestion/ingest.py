@@ -45,12 +45,16 @@ class DocumentIngestionPipeline:
         self.clean_before_ingest = clean_before_ingest
         self.sql_schema_path = sql_schema_path
         
-        # Configure  PDF extraction
+        # Configure PDF extraction.
+        # PDF_INCLUDE_IMAGES toggles SmolVLM-based image description.
+        # Default is off because the VLM runs on CPU (no GPU passthrough on
+        # macOS Docker) and adds ~minutes/page with little retrieval signal
+        # for text-heavy reports. Set PDF_INCLUDE_IMAGES=1 to enable.
         self.extractor_config = PDFExtractionConfig(
-            enable_ocr=False,
+            enable_ocr=os.getenv("PDF_ENABLE_OCR", "0") == "1",
             images_scale=1.0,
-            include_images=True,
-            include_tables=True,
+            include_images=os.getenv("PDF_INCLUDE_IMAGES", "0") == "1",
+            include_tables=os.getenv("PDF_INCLUDE_TABLES", "1") == "1",
         )
 
         # Configure chunking
@@ -225,11 +229,27 @@ class DocumentIngestionPipeline:
 
         return results
 
-    async def aembed_chunks(self, chunks: List[DocumentChunk], model: str = "text-embedding-3-small") -> List[DocumentChunk]:
-        """Generate embeddings for chunks (LangChain handles batching internally)."""
-        embeddings = OpenAIEmbeddings(model=model)
+    async def aembed_chunks(self, chunks: List[DocumentChunk], model: Optional[str] = None) -> List[DocumentChunk]:
+        """Generate embeddings for chunks (LangChain handles batching internally).
 
-        # Tüm chunk içeriklerini al
+        Reads EMBEDDING_MODEL from the environment so the same code works
+        against OpenAI, Ollama, or any OpenAI-compatible endpoint configured
+        via OPENAI_BASE_URL. Pre-tokenisation via tiktoken is disabled
+        because Ollama's /v1/embeddings shim only accepts raw strings as
+        input, not the token-id arrays LangChain sends by default.
+        """
+        model = model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+        # chunk_size below is LangChain's HTTP batch size, not text chunk
+        # size. Cap to a small number because Ollama's /v1/embeddings shim
+        # is single-threaded and crashes its tokenizer subprocess on large
+        # batches; OpenAI tolerates much higher (default 1000).
+        embeddings = OpenAIEmbeddings(
+            model=model,
+            tiktoken_enabled=False,
+            check_embedding_ctx_length=False,
+            chunk_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "16")),
+        )
+
         texts = [chunk.content for chunk in chunks]
 
         vectors = await embeddings.aembed_documents(texts)

@@ -51,7 +51,13 @@ class PDFSemanticChunker:
     
     def __init__(self, config: ChunkingConfig):
         self.config = config
-        self.embeddings = OpenAIEmbeddings(api_key=os.getenv("OPENAI_API_KEY"))
+        self.embeddings = OpenAIEmbeddings(
+            model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
+            api_key=os.getenv("OPENAI_API_KEY"),
+            tiktoken_enabled=False,
+            check_embedding_ctx_length=False,
+            chunk_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "16")),
+        )
         
         # Semantic splitter
         if config.use_semantic_splitting:

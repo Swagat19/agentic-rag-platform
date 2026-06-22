@@ -24,11 +24,15 @@ CREATE TABLE documents (
 CREATE INDEX idx_documents_metadata ON documents USING GIN (metadata);
 CREATE INDEX idx_documents_created_at ON documents (created_at DESC);
 
+-- Embedding dimension is 768 to match Ollama's `nomic-embed-text` model
+-- (the default in .env.example). If you switch to OpenAI's
+-- `text-embedding-3-small` (1536 dim) or a different model, update this
+-- column and both function signatures below, then reinitialise the DB.
 CREATE TABLE chunks (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
-    embedding vector(1536),
+    embedding vector(768),
     chunk_index INTEGER NOT NULL,
     metadata JSONB DEFAULT '{}',
     token_count INTEGER,
@@ -65,7 +69,7 @@ CREATE INDEX idx_messages_session_id ON messages (session_id, created_at);
 
 
 CREATE OR REPLACE FUNCTION match_chunks(
-    query_embedding vector(1536),
+    query_embedding vector(768),
     match_count INT DEFAULT 10
 )
 RETURNS TABLE (
@@ -98,7 +102,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION hybrid_search(
-    query_embedding vector(1536),
+    query_embedding vector(768),
     query_text TEXT,
     match_count INT DEFAULT 10,
     text_weight FLOAT DEFAULT 0.3

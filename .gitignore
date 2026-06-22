@@ -9,3 +9,9 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+# Local scratch dirs for running ingestion against a subset of documents.
+documents_smoke/
+
+# OS / editor noise
+.DS_Store

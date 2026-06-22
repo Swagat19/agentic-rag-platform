@@ -296,8 +296,10 @@ async def execute_agent(
         
         # Run the agent
         result = await rag_agent.run(full_prompt, deps=deps)
-        
-        response = result.data
+
+        # pydantic_ai >=0.0.40 renamed AgentRunResult.data -> .output.
+        # Tolerate both for portability across versions.
+        response = getattr(result, "output", None) or getattr(result, "data", None)
         tools_used = extract_tool_calls(result)
         
         # Save conversation if requested
