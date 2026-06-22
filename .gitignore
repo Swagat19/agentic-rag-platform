@@ -13,5 +13,10 @@ wheels/
 # Local scratch dirs for running ingestion against a subset of documents.
 documents_smoke/
 
+# Eval framework run outputs (timestamped, per-run); the framework code
+# itself is tracked, but every run's reports live here and are not.
+eval/results/*
+!eval/results/.gitkeep
+
 # OS / editor noise
 .DS_Store

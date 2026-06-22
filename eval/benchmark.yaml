@@ -1,0 +1,63 @@
+# Eval benchmark — micro set (v0).
+#
+# Authoring rules (see eval/README.md for full rationale):
+#   * Questions are written without reference to the SQL-as-tool feature.
+#   * Each question is sourced from a generic ESG/sustainability analyst's
+#     viewpoint or directly from the report's table of contents.
+#     Questions are NOT chosen because we expect a particular strategy to
+#     win on them.
+#   * `gold_chunk_keywords` is the loose ground-truth: a chunk that contains
+#     ALL these keywords (case-insensitive substring) is treated as gold.
+#     Strict ID-level labelling will populate `gold_chunk_ids` later.
+#   * `expected_numbers` is used for numeric_match scoring of /chat answers.
+#     Leave empty for non-numeric or definitional questions.
+#   * `category` reports per-category metrics so we can see whether a
+#     change helped some question types and hurt others, instead of hiding
+#     trade-offs in a single aggregate number.
+
+corpus:
+  description: "NTT DATA Sustainability Report 2024 (sr2024.pdf) only"
+  expected_documents:
+    - sr2024
+
+questions:
+  - id: scope12-target-2030
+    category: factoid
+    question: "By what percentage does NTT DATA aim to reduce Scope 1 and 2 GHG emissions by fiscal 2030, compared with what baseline year?"
+    gold_chunk_keywords: ["68", "Scope 1", "fiscal 2021"]
+    gold_chunk_ids: []
+    expected_numbers: ["68", "2021", "2030"]
+
+  - id: scope3-target-2030
+    category: factoid
+    question: "What is NTT DATA's Scope 3 GHG emission reduction target by fiscal 2030?"
+    gold_chunk_keywords: ["42", "Scope 3"]
+    gold_chunk_ids: []
+    expected_numbers: ["42", "2030"]
+
+  - id: net-zero-roadmap
+    category: multi-hop
+    question: "By what year does NTT DATA plan to reach net-zero emissions for Scope 1 and 2, and by what year for all scopes (Scope 1, 2, and 3)?"
+    gold_chunk_keywords: ["net-zero"]
+    gold_chunk_ids: []
+    expected_numbers: ["2035", "2040"]
+
+  - id: waste-recycling-target
+    category: table-lookup
+    question: "What is NTT DATA's target for general and industrial waste recycling rate, and what was the fiscal 2023 achievement?"
+    gold_chunk_keywords: ["waste", "recycling", "99"]
+    gold_chunk_ids: []
+    expected_numbers: ["99"]
+
+  - id: ceo-personal-salary
+    category: negative
+    question: "What is NTT DATA's CEO's personal annual salary in US dollars?"
+    # A sustainability report is unlikely to disclose a specific personal
+    # CEO salary in USD. The "right" behaviour here is for retrieval to
+    # return weak/off-topic chunks AND for /chat to either decline to
+    # answer or admit the report doesn't say. Both gold_chunk_keywords
+    # and expected_numbers are intentionally empty: keyword recall will
+    # therefore be 0 by construction, and numeric_match is not scored.
+    gold_chunk_keywords: []
+    gold_chunk_ids: []
+    expected_numbers: []
