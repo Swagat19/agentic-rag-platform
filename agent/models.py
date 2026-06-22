@@ -71,6 +71,12 @@ class ChatResponse(BaseModel):
     message: str
     session_id: str
     sources: List[DocumentMetadata] = Field(default_factory=list)
+    # retrieved_chunks captures the actual chunks the agent pulled in via
+    # its retrieval tools during this turn. Populated from the
+    # ToolReturnPart entries of vector_search / hybrid_search calls.
+    # The existing `sources` field is kept (typed as DocumentMetadata)
+    # for backward compatibility with the original upstream contract.
+    retrieved_chunks: List[ChunkResult] = Field(default_factory=list)
     tools_used: List[ToolCall] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 

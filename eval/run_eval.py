@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from .judge import JudgeCache, score_answer
 from .metrics import (
     QuestionScore,
     aggregate,
@@ -39,6 +40,7 @@ from .strategies import DEFAULT_API_URL, default_registry
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EVAL_DIR = REPO_ROOT / "eval"
 RESULTS_DIR = EVAL_DIR / "results"
+JUDGE_CACHE_PATH = RESULTS_DIR / ".judge_cache.json"
 
 
 # ---------------------------------------------------------------------------
@@ -122,15 +124,19 @@ def render_markdown(
     overall = summary["overall"]
     lines.append("## Overall")
     lines.append("")
-    lines.append("| n | recall@k | precision@k | MRR | numeric-match | avg latency (ms) |")
-    lines.append("|---|---|---|---|---|---|")
     lines.append(
-        "| {n} | {r} | {p} | {m} | {nm} | {lat} |".format(
+        "| n | recall@k | precision@k | MRR | numeric-match | faithfulness | relevance | avg latency (ms) |"
+    )
+    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append(
+        "| {n} | {r} | {p} | {m} | {nm} | {f} | {rel} | {lat} |".format(
             n=overall["n"],
             r=_fmt(overall["recall_at_k"]),
             p=_fmt(overall["precision_at_k"]),
             m=_fmt(overall["mrr"]),
             nm=_fmt(overall["numeric_match"]),
+            f=_fmt(overall.get("faithfulness")),
+            rel=_fmt(overall.get("answer_relevance")),
             lat=_fmt(overall["avg_latency_ms"], digits=0),
         )
     )
@@ -138,34 +144,42 @@ def render_markdown(
 
     lines.append("## Per category")
     lines.append("")
-    lines.append("| category | n | recall@k | precision@k | MRR | numeric-match |")
-    lines.append("|---|---|---|---|---|---|")
+    lines.append(
+        "| category | n | recall@k | precision@k | MRR | numeric-match | faithfulness | relevance |"
+    )
+    lines.append("|---|---|---|---|---|---|---|---|")
     for cat, b in sorted(summary["by_category"].items()):
         lines.append(
-            "| {c} | {n} | {r} | {p} | {m} | {nm} |".format(
+            "| {c} | {n} | {r} | {p} | {m} | {nm} | {f} | {rel} |".format(
                 c=cat,
                 n=b["n"],
                 r=_fmt(b["recall_at_k"]),
                 p=_fmt(b["precision_at_k"]),
                 m=_fmt(b["mrr"]),
                 nm=_fmt(b["numeric_match"]),
+                f=_fmt(b.get("faithfulness")),
+                rel=_fmt(b.get("answer_relevance")),
             )
         )
     lines.append("")
 
     lines.append("## Per question")
     lines.append("")
-    lines.append("| id | category | recall@k | precision@k | RR | numeric-match | latency ms |")
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append(
+        "| id | category | recall@k | precision@k | RR | numeric-match | faithfulness | relevance | latency ms |"
+    )
+    lines.append("|---|---|---|---|---|---|---|---|---|")
     for s in per_question:
         lines.append(
-            "| {id} | {c} | {r} | {p} | {rr} | {nm} | {lat} |".format(
+            "| {id} | {c} | {r} | {p} | {rr} | {nm} | {f} | {rel} | {lat} |".format(
                 id=s.question_id,
                 c=s.category,
                 r=_fmt(s.recall_at_k),
                 p=_fmt(s.precision_at_k),
                 rr=_fmt(s.reciprocal_rank),
                 nm=_fmt(s.numeric_match),
+                f=_fmt(s.faithfulness),
+                rel=_fmt(s.answer_relevance),
                 lat=_fmt(s.latency_ms, digits=0),
             )
         )
@@ -203,6 +217,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="Print to stdout but skip writing to eval/results/.",
     )
+    parser.add_argument(
+        "--judge",
+        action="store_true",
+        help="Score each answer with the LLM-as-judge (faithfulness + relevance). "
+        "Requires the strategy to produce an answer (e.g. --strategy chat). "
+        "Skipped silently for retrieval-only strategies.",
+    )
+    parser.add_argument(
+        "--judge-model",
+        default=None,
+        help="Override JUDGE_MODEL just for this run.",
+    )
     args = parser.parse_args(argv)
 
     registry = default_registry(base_url=args.api_url)
@@ -220,6 +246,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Benchmark {args.benchmark} has no questions.", file=sys.stderr)
         return 2
 
+    judge_cache: Optional[JudgeCache] = None
+    if args.judge:
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        judge_cache = JudgeCache(JUDGE_CACHE_PATH)
+
     per_question: List[QuestionScore] = []
     raw_per_question: List[Dict[str, Any]] = []
     for q in questions:
@@ -231,6 +262,20 @@ def main(argv: Optional[List[str]] = None) -> int:
             k=args.k,
             latency_ms=result.latency_ms,
         )
+
+        if args.judge and result.answer:
+            judged = score_answer(
+                question=q["question"],
+                answer=result.answer,
+                chunks=result.chunks,
+                category=q.get("category", "general"),
+                model=args.judge_model,
+                cache=judge_cache,
+            )
+            score.faithfulness = judged.faithfulness
+            score.answer_relevance = judged.answer_relevance
+            score.judge_cached = judged.cached
+
         per_question.append(score)
         raw_per_question.append(
             {

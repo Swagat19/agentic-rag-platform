@@ -150,6 +150,9 @@ class QuestionScore:
     numeric_match: Optional[float]
     latency_ms: float
     answer: Optional[str] = None
+    faithfulness: Optional[float] = None
+    answer_relevance: Optional[float] = None
+    judge_cached: bool = False
 
 
 def aggregate(scores: Sequence[QuestionScore]) -> dict:
@@ -165,6 +168,8 @@ def aggregate(scores: Sequence[QuestionScore]) -> dict:
         "precision_at_k": _mean([s.precision_at_k for s in scores if s.precision_at_k is not None]),
         "mrr": _mean([s.reciprocal_rank for s in scores]),
         "numeric_match": _mean([s.numeric_match for s in scores if s.numeric_match is not None]),
+        "faithfulness": _mean([s.faithfulness for s in scores if s.faithfulness is not None]),
+        "answer_relevance": _mean([s.answer_relevance for s in scores if s.answer_relevance is not None]),
         "avg_latency_ms": _mean([s.latency_ms for s in scores]),
     }
 
@@ -172,7 +177,10 @@ def aggregate(scores: Sequence[QuestionScore]) -> dict:
     for s in scores:
         bucket = by_category.setdefault(
             s.category,
-            {"n": 0, "recall": [], "precision": [], "rr": [], "numeric": []},
+            {
+                "n": 0, "recall": [], "precision": [], "rr": [],
+                "numeric": [], "faith": [], "rel": [],
+            },
         )
         bucket["n"] += 1
         if s.recall_at_k is not None:
@@ -182,6 +190,10 @@ def aggregate(scores: Sequence[QuestionScore]) -> dict:
         bucket["rr"].append(s.reciprocal_rank)
         if s.numeric_match is not None:
             bucket["numeric"].append(s.numeric_match)
+        if s.faithfulness is not None:
+            bucket["faith"].append(s.faithfulness)
+        if s.answer_relevance is not None:
+            bucket["rel"].append(s.answer_relevance)
 
     summarised_categories = {
         cat: {
@@ -190,6 +202,8 @@ def aggregate(scores: Sequence[QuestionScore]) -> dict:
             "precision_at_k": _mean(b["precision"]),
             "mrr": _mean(b["rr"]),
             "numeric_match": _mean(b["numeric"]),
+            "faithfulness": _mean(b["faith"]),
+            "answer_relevance": _mean(b["rel"]),
         }
         for cat, b in by_category.items()
     }

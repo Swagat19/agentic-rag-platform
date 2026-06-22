@@ -101,7 +101,12 @@ class HttpChatStrategy:
         latency_ms = (time.perf_counter() - t0) * 1000.0
         resp.raise_for_status()
         body = resp.json()
-        sources = body.get("sources") or []
+        # `retrieved_chunks` is the surface populated from the agent's
+        # ToolReturnPart messages (the chunks it actually pulled in via
+        # vector_search / hybrid_search). `sources` was the original
+        # upstream field but it was always empty -- kept here as a
+        # fallback for compatibility with older API builds.
+        retrieved = body.get("retrieved_chunks") or body.get("sources") or []
         chunks = [
             {
                 "chunk_id": s.get("chunk_id"),
@@ -109,7 +114,7 @@ class HttpChatStrategy:
                 "score": s.get("score"),
                 "document_title": s.get("document_title"),
             }
-            for s in sources[:k]
+            for s in retrieved[:k]
         ]
         return StrategyResult(
             chunks=chunks,

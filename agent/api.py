@@ -28,6 +28,7 @@ from .db_utils import (
 from .models import (
     ChatRequest,
     ChatResponse,
+    ChunkResult,
     SearchRequest,
     SearchResponse,
     ErrorResponse,
@@ -159,6 +160,66 @@ async def get_conversation_context(
         for msg in messages
     ]
 
+def extract_retrieval_chunks(result) -> List[ChunkResult]:
+    """Pull every chunk the agent actually retrieved during this turn.
+
+    Walks the pydantic_ai message stream looking for ToolReturnPart
+    entries whose tool_name corresponds to one of our retrieval tools,
+    and aggregates their returned ChunkResult lists. De-duplicates by
+    chunk_id, preserving first-seen order so the agent's earliest
+    retrievals appear first.
+    """
+    seen_ids: set = set()
+    chunks: List[ChunkResult] = []
+
+    retrieval_tool_names = {"vector_search", "hybrid_search"}
+
+    try:
+        for message in result.all_messages():
+            for part in getattr(message, "parts", []) or []:
+                if part.__class__.__name__ != "ToolReturnPart":
+                    continue
+                tool_name = getattr(part, "tool_name", None)
+                if tool_name not in retrieval_tool_names:
+                    continue
+                content = getattr(part, "content", None)
+                if not isinstance(content, list):
+                    continue
+                for item in content:
+                    try:
+                        if isinstance(item, ChunkResult):
+                            chunk = item
+                        elif isinstance(item, dict):
+                            # The agent's tool wrappers in agent.py
+                            # intentionally strip document_id and metadata
+                            # from their dict payload to keep the LLM
+                            # context compact. Fill defaults so we can
+                            # still construct a valid ChunkResult here
+                            # without forcing a wider tool-payload change.
+                            chunk = ChunkResult(
+                                chunk_id=str(item.get("chunk_id", "")),
+                                document_id=str(item.get("document_id", "")),
+                                content=str(item.get("content", "")),
+                                score=float(item.get("score") or 0.0),
+                                metadata=item.get("metadata") or {},
+                                document_title=str(item.get("document_title", "")),
+                                document_source=str(item.get("document_source", "")),
+                            )
+                        else:
+                            continue
+                    except Exception as exc:
+                        logger.debug("Failed to coerce retrieval item to ChunkResult: %s", exc)
+                        continue
+                    if not chunk.chunk_id or chunk.chunk_id in seen_ids:
+                        continue
+                    seen_ids.add(chunk.chunk_id)
+                    chunks.append(chunk)
+    except Exception as exc:
+        logger.warning("Failed to extract retrieval chunks: %s", exc)
+
+    return chunks
+
+
 def extract_tool_calls(result) -> List[ToolCall]:
     """
     Extract tool calls from Pydantic AI result.
@@ -262,47 +323,38 @@ async def execute_agent(
     session_id: str,
     user_id: Optional[str] = None,
     save_conversation: bool = True
-) -> tuple[str, List[ToolCall]]:
+) -> tuple[str, List[ToolCall], List[ChunkResult]]:
     """
     Execute the agent with a message.
-    
-    Args:
-        message: User message
-        session_id: Session ID
-        user_id: Optional user ID
-        save_conversation: Whether to save the conversation
-    
+
     Returns:
-        Tuple of (agent response, tools used)
+        Tuple of (agent response, tools used, retrieved chunks).
+        Retrieved chunks are de-duplicated and ordered by first
+        appearance across all retrieval tool calls in this turn.
     """
     try:
-        # Create dependencies
         deps = AgentDependencies(
             session_id=session_id,
             user_id=user_id
         )
-        
-        # Get conversation context
+
         context = await get_conversation_context(session_id)
-        
-        # Build prompt with context
         full_prompt = message
         if context:
             context_str = "\n".join([
                 f"{msg['role']}: {msg['content']}"
-                for msg in context[-6:]  # Last 3 turns
+                for msg in context[-6:]
             ])
             full_prompt = f"Previous conversation:\n{context_str}\n\nCurrent question: {message}"
-        
-        # Run the agent
+
         result = await rag_agent.run(full_prompt, deps=deps)
 
         # pydantic_ai >=0.0.40 renamed AgentRunResult.data -> .output.
         # Tolerate both for portability across versions.
         response = getattr(result, "output", None) or getattr(result, "data", None)
         tools_used = extract_tool_calls(result)
-        
-        # Save conversation if requested
+        retrieved_chunks = extract_retrieval_chunks(result)
+
         if save_conversation:
             await save_conversation_turn(
                 session_id=session_id,
@@ -310,16 +362,17 @@ async def execute_agent(
                 assistant_message=response,
                 metadata={
                     "user_id": user_id,
-                    "tool_calls": len(tools_used)
+                    "tool_calls": len(tools_used),
+                    "retrieved_chunks": len(retrieved_chunks),
                 }
             )
-        
-        return response, tools_used
-        
+
+        return response, tools_used, retrieved_chunks
+
     except Exception as e:
         logger.error(f"Agent execution failed: {e}")
         error_response = f"I encountered an error while processing your request: {str(e)}"
-        
+
         if save_conversation:
             await save_conversation_turn(
                 session_id=session_id,
@@ -327,8 +380,8 @@ async def execute_agent(
                 assistant_message=error_response,
                 metadata={"error": str(e)}
             )
-        
-        return error_response, []
+
+        return error_response, [], []
 
 
 # API Endpoints
@@ -362,23 +415,25 @@ async def health_check():
 async def chat(request: ChatRequest):
     """Non-streaming chat endpoint."""
     try:
-        # Get or create session
         session_id = await get_or_create_session(request)
-        
-        # Execute agent
-        response, tools_used = await execute_agent(
+
+        response, tools_used, retrieved_chunks = await execute_agent(
             message=request.message,
             session_id=session_id,
             user_id=request.user_id
         )
-        
+
         return ChatResponse(
             message=response,
             session_id=session_id,
+            retrieved_chunks=retrieved_chunks,
             tools_used=tools_used,
-            metadata={"search_type": str(request.search_type)}
+            metadata={
+                "search_type": str(request.search_type),
+                "retrieved_chunk_count": len(retrieved_chunks),
+            }
         )
-        
+
     except Exception as e:
         logger.error(f"Chat endpoint failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
