@@ -1,337 +1,149 @@
+# Agentic RAG Platform with Hybrid Retrieval and Evaluation
 
-# Agentic RAG Project
+An agentic Retrieval-Augmented Generation system built on Pydantic AI and FastAPI,
+extending the base architecture with hybrid structured + unstructured retrieval
+(SQL-as-a-tool) and a reproducible evaluation suite that measures retrieval and
+generation quality across heterogeneous data sources.
 
-A modern Agentic RAG (Retrieval-Augmented Generation) system built with Pydantic AI, FastAPI, and PostgreSQL (pgvector). This project provides a scalable, modular, and production-ready foundation for document-based AI applications.
-## 📋 Table of Contents
+> **Attribution.** This project is built on top of
+> [serkanyasr/agentic_rag_project](https://github.com/serkanyasr/agentic_rag_project),
+> which provides the base architecture (Pydantic AI agent, FastAPI server, pgvector
+> storage, hybrid text + vector search, Docling-based ingestion, Streamlit UI). My
+> contributions are listed below; the rest is upstream code I am studying,
+> extending, and operating.
 
-- [Features](#features)
-- [Tech Stack](#tech-stack)
-- [Installation](#installation)
-- [Usage](#usage)
-- [API Reference](#api-reference)
-- [Project Structure](#project-structure)
-- [Development](#development)
-- [Testing](#testing)
-- [License](#license)
+---
 
-## ✨ Features
+## My Contributions
 
-- 🧠 Pydantic AI-based intelligent agent system
-- 🔍 Multiple search strategies: Vector Search and Hybrid Search
-- 📄 Advanced PDF processing: Table and image extraction with Docling
-- 💾 Database: PostgreSQL + pgvector extension
-- 🌊 Real-time streaming: Live responses via Server-Sent Events
-- 🎯 Session management: Conversation history and context retention
-- 🐳 Docker containerization: Easy deployment
-- 🔧 Type safety: Reliable data handling with Pydantic models
-- ⚡ Instant ingestion: Upload documents and query immediately
+> _(Filled in as the project evolves. Each item maps to one or more commits.)_
 
-## 🛠️ Tech Stack
+- [ ] **Retrieval evaluation framework** — benchmark dataset and metrics
+      (recall@k, MRR, hit rate, faithfulness, answer relevance) with a CLI
+      runner and markdown reports for head-to-head retrieval-strategy
+      comparison.
+- [ ] **Hybrid structured + unstructured retrieval** — add a SQL-as-a-tool
+      capability over a separate domain database, with an LLM-driven
+      query-type router that selects between vector search, SQL, or fused
+      multi-source retrieval.
+- [ ] **Provider-pluggable agent runtime** — `OPENAI_BASE_URL` support so the
+      stack runs against OpenAI, Ollama, Groq, or any OpenAI-compatible
+      endpoint with zero code changes.
+- [x] **Dev tooling** — Makefile wrapper that neutralises shell-env
+      pollution; Dockerfile pinned to the Python version `pyproject.toml`
+      actually requires.
 
-### Backend
+---
 
-- [Pydantic AI](https://ai.pydantic.dev/) - AI Agent Framework
-- [FastAPI](https://fastapi.tiangolo.com/) - Modern Python web framework
-- [LangChain](https://langchain.readthedocs.io/) - Document processing and embeddings
-- [Docling](https://github.com/DS4SD/docling) - PDF extraction and analysis
-- [AsyncPG](https://magicstack.github.io/asyncpg/) - PostgreSQL async client
-- [pgvector](https://github.com/pgvector/pgvector) - Vector similarity search
+## Architecture
 
-### Frontend
+Three services orchestrated via Docker Compose:
 
-- [Streamlit](https://streamlit.io/) - Interactive web interface
+| Service             | Tech                                                    | Role                                                              |
+| ------------------- | ------------------------------------------------------- | ----------------------------------------------------------------- |
+| `agent_api`         | Python 3.12 · FastAPI · Pydantic AI (`:8058`)           | Agent runtime; exposes retrieval, chat, and streaming endpoints   |
+| `agent_ui`          | Streamlit (`:8501`)                                     | Interactive chat UI                                               |
+| `postgres_pgvector` | Postgres 17 · pgvector · pg_trgm (host `:6543`)         | Document store, vector index, and full-text trigram index         |
 
-### Infrastructure
+**Current agent tools (upstream):**
 
-- [PostgreSQL 17](https://www.postgresql.org/) - Primary database
-- [Docker Compose](https://docs.docker.com/compose/) - Multi-container deployment
-- [uv](https://github.com/astral-sh/uv) - Fast Python package installer
+| Tool             | What it does                                                      |
+| ---------------- | ----------------------------------------------------------------- |
+| `vector_search`  | Semantic similarity search via pgvector cosine distance           |
+| `hybrid_search`  | Weighted blend of vector similarity and BM25 trigram text rank    |
+| `get_document`   | Fetch a single document by id                                     |
+| `list_documents` | Paginated corpus listing                                          |
 
-## 🚀 Installation
+**Planned tools (this project):**
+
+| Tool           | What it will do                                                                |
+| -------------- | ------------------------------------------------------------------------------ |
+| `sql_search`   | Agent-issued NL → SQL against a separate structured domain database            |
+| `query_router` | Upstream classifier that selects which tool(s) to invoke based on the question |
+
+---
+
+## Quick Start
 
 ### Prerequisites
 
-- Python 3.12+
-- Docker & Docker Compose
-- Git
+- Docker + Docker Compose
+- An LLM provider — **Ollama** (free, local) is the recommended path; OpenAI
+  and any OpenAI-compatible endpoint are also supported.
+- ~10 GB free disk if running models locally with Ollama.
 
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/serkanyasr/ntt_rag_project.git
-cd ntt_rag_project
-```
-
-### 2. Set Up Environment Variables
-
-Create a `.env` file:
+### Boot the stack
 
 ```bash
-# API Configuration
-APP_ENV=development
-LOG_LEVEL=INFO
-APP_HOST=0.0.0.0
-APP_PORT=8058
-API_URL=http://api:8058
-
-# Streamlit Configuration
-SERVER_PORT=8501
-SERVER_HOST=0.0.0.0
-
-# PostgreSQL Vector DB Configuration
-DB_USER=postgres
-DB_PASSWORD=postgres
-DB_HOST=postgres
-DB_PORT=5432
-DB_NAME=vector_db
-
-# OpenAI API Configuration (required)
-OPENAI_API_KEY=your_openai_api_key
-LLM_CHOICE=gpt-4o-mini
-EMBEDDING_MODEL=text-embedding-3-small
+make up        # wraps `docker compose up -d` and unsets polluting shell env
+make status    # confirm containers are healthy and API /health is green
 ```
 
-### 3. Start with Docker
+| What           | URL                                       |
+| -------------- | ----------------------------------------- |
+| API            | http://localhost:8058 (Swagger at `/docs`) |
+| UI             | http://localhost:8501                     |
+| Postgres       | `localhost:6543`  (postgres / postgres / vector_db) |
+
+### Configure the LLM provider
+
+Copy `.env.example` to `.env` and fill in values. Default `.env.example` is
+Ollama-friendly (set `OPENAI_BASE_URL=http://host.docker.internal:11434/v1`
+and use any string as the API key). For OpenAI, set a real `OPENAI_API_KEY`
+and leave `OPENAI_BASE_URL` unset.
+
+### Ingest documents
 
 ```bash
-docker-compose up -d
-docker-compose logs -f
+make ingest    # runs the Docling-based ingestion pipeline over documents/
 ```
 
-## 📚 Usage
-
-### Web Interface
-
-Access the Streamlit UI: <http://localhost:8501>
-
-The web interface now includes:
-
-- **Interactive Chat**: Ask questions about your uploaded documents
-- **Health Monitoring**: Check API connection status
-- **Session Management**: Persistent conversation history
-
-### API Usage
-
-FastAPI documentation: <http://localhost:8058/docs>
-
-#### Chat Endpoint Example
-
-```python
-import requests
-
-response = requests.post("http://localhost:8058/chat", json={
-    "message": "Hello, how can I help you?",
-    "session_id": "optional-session-id",
-    "user_id": "user-123",
-    "search_type": "hybrid"
-})
-print(response.json())
-```
-
-#### Streaming Chat Example
-
-```python
-import requests
-import json
-
-response = requests.post(
-    "http://localhost:8058/chat/stream",
-    json={
-        "message": "Give a long explanation",
-        "search_type": "hybrid"
-    },
-    stream=True
-)
-
-for line in response.iter_lines():
-    if line.startswith(b'data: '):
-        data = json.loads(line[6:])
-        if data.get("type") == "text":
-            print(data.get("content"), end="")
-```
-
-### Document Ingestion
-
-#### Command Line Ingestion
+### Tear down
 
 ```bash
-# Place your PDF documents in the documents/ folder
-cp your_document.pdf documents/
-
-# Run the ingestion script
-python -m ingestion.ingest --documents documents/
+make stop      # stop containers, keep the volume
+make down      # remove containers + volume
+make clean     # also remove built images (full reset)
 ```
-
-## 📖 API Reference
-
-### Endpoints
-
-#### Chat Endpoints
-
-- `POST /chat` - Single chat message
-- `POST /chat/stream` - Streaming chat
-- `GET /chat/sessions/{session_id}` - Session history
-
-#### Search Endpoints
-
-- `POST /search/vector` - Vector search
-- `POST /search/hybrid` - Hybrid search
-
-#### Health Check
-
-- `GET /health` - System status
-
-### Request/Response Models
-
-#### Chat Request
-
-```json
-{
-  "message": "Your question",
-  "session_id": "optional-session-id",
-  "user_id": "user-id",
-  "search_type": "hybrid",
-  "metadata": {}
-}
-```
-
-
-#### Search Request
-
-```json
-{
-  "query": "Search query",
-  "search_type": "vector",
-  "limit": 10,
-  "filters": {}
-}
-```
-
-## 🏗️ Project Structure
-
-```text
-ntt_rag_project/
-├── agent/                  # AI Agent and business logic
-│   ├── agent.py           # Main Pydantic AI agent
-│   ├── api.py             # FastAPI endpoints
-│   ├── db_utils.py        # Database operations
-│   ├── models.py          # Pydantic models
-│   ├── prompts.py         # System prompts
-│   ├── providers.py       # LLM and embedding providers
-│   └── tools.py           # Agent tools
-├── ingestion/             # Document processing
-│   ├── chunker.py         # Text chunking
-│   ├── extract_files.py   # PDF extraction
-│   └── ingest.py          # Main ingestion pipeline
-├── ui/                    # Streamlit UI
-│   └── app.py
-├── sql/                   # Database schema
-│   └── schema.sql
-├── tests/                 # Test files
-├── documents/             # PDF documents
-├── docker-compose.yml     # Container orchestration
-├── Dockerfile
-└── pyproject.toml         # Python dependencies
-```
-
-### Main Components
-
-#### Agent (`/agent/`)
-
-- **agent.py**: Pydantic AI agent definition and tool registrations
-- **api.py**: FastAPI web server and endpoints
-- **tools.py**: Vector search, hybrid search, document retrieval tools
-- **db_utils.py**: PostgreSQL operations and connection management
-- **models.py**: Pydantic data models and validation
-
-#### Ingestion (`/ingestion/`)
-
-- **ingest.py**: Main document processing pipeline
-- **extract_files.py**: PDF text, table, and image extraction
-- **chunker.py**: Intelligent text chunking strategies
-
-## 🧪 Testing
-
-### Running Tests
-
-```bash
-pytest
-pytest tests/agent/test_models.py
-pytest --cov=agent --cov=ingestion
-```
-
-### Test Categories
-
-- **Model Tests**: Pydantic model validation
-- **Agent Tests**: AI agent functionality
-- **Database Tests**: PostgreSQL operations
-- **Ingestion Tests**: Document processing
-
-## ⚙️ Development
-
-### Development Setup
-
-```bash
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install uv
-uv pip install -r pyproject.toml
-pre-commit install
-```
-
-
-### Logging
-
-```bash
-export LOG_LEVEL=DEBUG
-docker-compose logs -f api
-```
-
-## 🔧 Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DB_NAME` | PostgreSQL database name | `rag_db` |
-| `DB_USER` | PostgreSQL user | `rag_user` |
-| `DB_PASSWORD` | PostgreSQL password | - |
-| `OPENAI_API_KEY` | OpenAI API key | - |
-| `APP_PORT` | FastAPI port | `8058` |
-| `SERVER_PORT` | Streamlit port | `8501` |
-| `LLM_MODEL` | LLM model | `gpt-4` |
-| `EMBEDDING_MODEL` | Embedding model | `text-embedding-3-small` |
-
-### Docker Compose Overrides
-
-You can create a `docker-compose.override.yml` for custom configurations.
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### Database Connection Error
-
-```bash
-docker-compose ps postgres
-docker-compose logs postgres
-```
-
-#### OpenAI API Error
-
-```bash
-echo $OPENAI_API_KEY
-```
-
-#### Port Conflicts
-
-```bash
-netstat -an | grep :8058
-netstat -an | grep :8501
-```
-
-## 📄 License
-
-MIT License - See `LICENSE` for details.
 
 ---
+
+## Endpoints
+
+```
+GET  /health                   - health + DB + LLM client status
+POST /chat                     - single-turn chat
+POST /chat/stream              - SSE-streamed chat
+POST /search/vector            - direct vector search (bypasses the agent)
+POST /search/hybrid            - direct hybrid search (bypasses the agent)
+GET  /documents                - list ingested documents
+GET  /sessions/{session_id}    - conversation history for a session
+```
+
+Full schema at `http://localhost:8058/docs`.
+
+---
+
+## Roadmap
+
+- [x] Initial import + attribution
+- [x] Dev tooling: Makefile wrapper, Dockerfile python pin
+- [ ] Provider-pluggable runtime (`OPENAI_BASE_URL`, configurable embedding
+      dimension to match local providers like Ollama)
+- [ ] Retrieval evaluation framework (benchmark dataset + metrics + runner)
+- [ ] Baseline evaluation run on the upstream tools (checked-in results)
+- [ ] Hybrid structured + unstructured retrieval: domain DB + `sql_search`
+      tool + safety guards (read-only, allowlisted tables, parameterised
+      queries)
+- [ ] Query-type router (LLM-classified) and multi-source result fusion
+- [ ] Post-improvement evaluation run + head-to-head comparison table
+- [ ] Final README polish: design choices, evaluation methodology, demo
+      numbers
+
+---
+
+## License
+
+Same as the upstream project. See
+[serkanyasr/agentic_rag_project](https://github.com/serkanyasr/agentic_rag_project)
+for original license terms.
