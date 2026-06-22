@@ -25,28 +25,46 @@ questions:
     category: factoid
     question: "By what percentage does NTT DATA aim to reduce Scope 1 and 2 GHG emissions by fiscal 2030, compared with what baseline year?"
     gold_chunk_keywords: ["68", "Scope 1", "fiscal 2021"]
-    gold_chunk_ids: []
+    # Bootstrapped 2026-06-22 by /search/hybrid + manual content inspection.
+    # e0ed8e3f is the prose chunk with the full SBTi sentence ("68% reduction
+    # in Scope 1 and 2 ... compared with fiscal 2021"). 066b8eda is a tabular
+    # chunk listing the same target ("Scope 1 and 2: Reduce by 68%") and is
+    # accepted as gold because it independently answers the question.
+    gold_chunk_ids:
+      - "e0ed8e3f-460d-4f53-93dd-6c8203e344d4"
+      - "066b8eda-71f4-4405-be8d-c2da1dfbec10"
     expected_numbers: ["68", "2021", "2030"]
 
   - id: scope3-target-2030
     category: factoid
     question: "What is NTT DATA's Scope 3 GHG emission reduction target by fiscal 2030?"
     gold_chunk_keywords: ["42", "Scope 3"]
-    gold_chunk_ids: []
+    gold_chunk_ids:
+      - "e0ed8e3f-460d-4f53-93dd-6c8203e344d4"
+      - "066b8eda-71f4-4405-be8d-c2da1dfbec10"
     expected_numbers: ["42", "2030"]
 
   - id: net-zero-roadmap
     category: multi-hop
     question: "By what year does NTT DATA plan to reach net-zero emissions for Scope 1 and 2, and by what year for all scopes (Scope 1, 2, and 3)?"
     gold_chunk_keywords: ["net-zero"]
-    gold_chunk_ids: []
+    # Both years (2035 for Scope 1+2, 2040 for all scopes) appear in the
+    # same chunk -- this question is multi-fact but single-chunk on this
+    # corpus, so a single gold ID is appropriate here.
+    gold_chunk_ids:
+      - "066b8eda-71f4-4405-be8d-c2da1dfbec10"
     expected_numbers: ["2035", "2040"]
 
   - id: waste-recycling-target
     category: table-lookup
     question: "What is NTT DATA's target for general and industrial waste recycling rate, and what was the fiscal 2023 achievement?"
     gold_chunk_keywords: ["waste", "recycling", "99"]
-    gold_chunk_ids: []
+    # 3acdee72 is the table row containing "Waste recycling rate | General
+    # and industrial waste: 99% or more". 9c44f330 is the surrounding prose
+    # / table fragment that also contains the FY2023 achievement number.
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "9c44f330-5aa3-4afb-b1f0-2b176075947b"
     expected_numbers: ["99"]
 
   - id: ceo-personal-salary
