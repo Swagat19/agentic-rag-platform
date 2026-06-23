@@ -430,6 +430,54 @@ async def hybrid_search(
             for row in results
         ]
 
+async def sql_kpi_search(
+    query_text: str,
+    target_year: Optional[int] = None,
+    target_category: Optional[str] = None,
+    limit: int = 10,
+    min_similarity: float = 0.10,
+) -> List[Dict[str, Any]]:
+    """Look up structured KPI facts populated by the extraction pass.
+
+    Wraps the search_kpi_facts SQL function. Returns rows joined with
+    their source chunk so callers can both quote the structured value
+    and cite the surrounding text.
+    """
+    async with db_pool.acquire() as conn:
+        results = await conn.fetch(
+            """
+            SELECT * FROM search_kpi_facts(
+                $1::text, $2::int, $3::text, $4::int, $5::real
+            )
+            """,
+            query_text,
+            target_year,
+            target_category,
+            limit,
+            min_similarity,
+        )
+        return [
+            {
+                "fact_id": str(row["fact_id"]),
+                "metric_name": row["metric_name"],
+                "value": row["value"],
+                "unit": row["unit"],
+                "year": row["year"],
+                "scope": row["scope"],
+                "baseline_year": row["baseline_year"],
+                "category": row["category"],
+                "similarity": float(row["similarity"]) if row["similarity"] is not None else 0.0,
+                "source_chunk_id": str(row["source_chunk_id"]),
+                "source_document_id": str(row["source_document_id"]),
+                "chunk_content": row["chunk_content"],
+                "document_title": row["document_title"],
+                "document_source": row["document_source"],
+                "extracted_text": row["extracted_text"],
+                "confidence": float(row["confidence"]) if row["confidence"] is not None else None,
+            }
+            for row in results
+        ]
+
 # Chunk Management Functions
 async def get_document_chunks(document_id: str) -> List[Dict[str, Any]]:
     """

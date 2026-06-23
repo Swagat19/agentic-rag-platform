@@ -9,12 +9,14 @@ from .providers import get_llm_model
 from .tools import (
     vector_search_tool,
     hybrid_search_tool,
+    sql_kpi_search_tool,
     get_document_tool,
     list_documents_tool,
     VectorSearchInput,
     HybridSearchInput,
+    KpiSearchInput,
     DocumentInput,
-    DocumentListInput
+    DocumentListInput,
 )
 
 # Load environment variables
@@ -37,11 +39,16 @@ class AgentDependencies:
                 "default_limit": 10
             }
 
-# Initialize the agent with flexible model configuration
+# Initialize the agent with flexible model configuration.
+# temperature=0 keeps tool selection (and the eval results that depend on
+# it) reproducible across runs. Smaller open-source LLMs occasionally
+# emit a non-tool-calling text reply at higher temperatures, which
+# manifests as silent retrieval drops in the chat-mode eval.
 rag_agent = Agent(
     get_llm_model(),
     deps_type=AgentDependencies,
-    system_prompt=SYSTEM_PROMPT
+    system_prompt=SYSTEM_PROMPT,
+    model_settings={"temperature": 0.0},
 )
 
 # Register tools with proper docstrings (no description parameter)
@@ -122,6 +129,68 @@ async def hybrid_search(
             "document_title": r.document_title,
             "document_source": r.document_source,
             "chunk_id": r.chunk_id
+        }
+        for r in results
+    ]
+
+
+@rag_agent.tool
+async def sql_kpi_search(
+    ctx: RunContext[AgentDependencies],
+    query: str,
+    year: Optional[int] = None,
+    category: Optional[str] = None,
+    limit: int = 5,
+) -> List[Dict[str, Any]]:
+    """
+    Look up specific quantitative KPIs in the structured kpi_facts table.
+
+    Prefer this tool over vector_search / hybrid_search when the user is
+    asking for a *specific number*: a target percentage, an emissions
+    figure, a year-over-year achievement, a ratio. The structured table
+    indexes by metric_name (trigram similarity) plus optional year and
+    category filters, so it returns the right row even when the
+    surrounding chunk text is too noisy for embedding-based retrieval
+    to surface (e.g. dense KPI tables).
+
+    Each result includes both the structured fact and the originating
+    chunk content, so you can quote the value AND cite the supporting
+    text from the report.
+
+    Args:
+        query: Metric name or noun phrase, e.g. "waste recycling rate",
+            "Scope 1 and 2 emissions reduction target".
+        year: Optional year filter (target year or reporting year).
+        category: Optional one of: emissions, energy, water, waste,
+            diversity, governance, supply_chain, social, financial, other.
+        limit: Maximum number of facts to return (default 5).
+
+    Returns:
+        List of structured KPI rows joined with their source chunk.
+    """
+    input_data = KpiSearchInput(
+        query=query,
+        year=year,
+        category=category,
+        limit=limit,
+    )
+
+    results = await sql_kpi_search_tool(input_data)
+
+    return [
+        {
+            "metric_name": r.metric_name,
+            "value": r.value,
+            "unit": r.unit,
+            "year": r.year,
+            "scope": r.scope,
+            "baseline_year": r.baseline_year,
+            "category": r.category,
+            "similarity": r.similarity,
+            "chunk_id": r.source_chunk_id,
+            "document_title": r.document_title,
+            "document_source": r.document_source,
+            "supporting_text": r.chunk_content[:600],
         }
         for r in results
     ]

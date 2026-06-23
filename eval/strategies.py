@@ -77,6 +77,45 @@ class HttpSearchStrategy:
 
 
 @dataclass
+class HttpSqlStrategy:
+    """Adapter for /search/sql, the structured KPI lookup endpoint.
+
+    Each result row is a structured fact joined with its source chunk.
+    For uniform scoring against the chunk-level gold IDs, we project
+    `source_chunk_id` onto the standard `chunk_id` field. The
+    structured payload is preserved on each chunk for downstream
+    inspection of which metric_name actually matched.
+    """
+
+    name: str
+    base_url: str = DEFAULT_API_URL
+    timeout_s: float = 60.0
+
+    def run(self, question: str, *, k: int) -> StrategyResult:
+        payload = {"query": question, "limit": k}
+        t0 = time.perf_counter()
+        with httpx.Client(timeout=self.timeout_s) as client:
+            resp = client.post(f"{self.base_url}/search/sql", json=payload)
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        resp.raise_for_status()
+        body = resp.json()
+        chunks = [
+            {
+                "chunk_id": r.get("source_chunk_id"),
+                "content": r.get("chunk_content", ""),
+                "score": r.get("similarity"),
+                "document_title": r.get("document_title"),
+                "kpi_metric_name": r.get("metric_name"),
+                "kpi_value": r.get("value"),
+                "kpi_year": r.get("year"),
+                "kpi_category": r.get("category"),
+            }
+            for r in body.get("results", [])
+        ]
+        return StrategyResult(chunks=chunks, latency_ms=latency_ms, raw=body)
+
+
+@dataclass
 class HttpChatStrategy:
     """Adapter for /chat. Captures the agent's final answer plus any tool
     calls reported in the response, so we can still score retrieval recall
@@ -143,5 +182,6 @@ def default_registry(base_url: str = DEFAULT_API_URL) -> Dict[str, Callable[[], 
         "hybrid": lambda: HttpSearchStrategy(
             name="hybrid", endpoint="/search/hybrid", base_url=base_url
         ),
+        "sql": lambda: HttpSqlStrategy(name="sql", base_url=base_url),
         "chat": lambda: HttpChatStrategy(name="chat", base_url=base_url),
     }

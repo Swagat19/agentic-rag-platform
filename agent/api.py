@@ -29,6 +29,8 @@ from .models import (
     ChatRequest,
     ChatResponse,
     ChunkResult,
+    KpiFactResult,
+    KpiSearchResponse,
     SearchRequest,
     SearchResponse,
     ErrorResponse,
@@ -38,10 +40,12 @@ from .models import (
 from .tools import (
     vector_search_tool,
     hybrid_search_tool,
+    sql_kpi_search_tool,
     list_documents_tool,
     VectorSearchInput,
     HybridSearchInput,
-    DocumentListInput
+    KpiSearchInput,
+    DocumentListInput,
 )
 
 # Load environment variables
@@ -172,7 +176,8 @@ def extract_retrieval_chunks(result) -> List[ChunkResult]:
     seen_ids: set = set()
     chunks: List[ChunkResult] = []
 
-    retrieval_tool_names = {"vector_search", "hybrid_search"}
+    chunk_retrieval_tools = {"vector_search", "hybrid_search"}
+    sql_retrieval_tool = "sql_kpi_search"
 
     try:
         for message in result.all_messages():
@@ -180,7 +185,7 @@ def extract_retrieval_chunks(result) -> List[ChunkResult]:
                 if part.__class__.__name__ != "ToolReturnPart":
                     continue
                 tool_name = getattr(part, "tool_name", None)
-                if tool_name not in retrieval_tool_names:
+                if tool_name not in chunk_retrieval_tools and tool_name != sql_retrieval_tool:
                     continue
                 content = getattr(part, "content", None)
                 if not isinstance(content, list):
@@ -189,6 +194,30 @@ def extract_retrieval_chunks(result) -> List[ChunkResult]:
                     try:
                         if isinstance(item, ChunkResult):
                             chunk = item
+                        elif tool_name == sql_retrieval_tool:
+                            # Project sql_kpi_search rows onto ChunkResult so
+                            # the eval framework's chunk-level retrieval
+                            # metrics (recall@k / MRR) treat SQL hits and
+                            # vector/hybrid hits uniformly. The structured
+                            # fact metadata is preserved so downstream
+                            # consumers can still distinguish the two.
+                            if not isinstance(item, dict):
+                                continue
+                            chunk = ChunkResult(
+                                chunk_id=str(item.get("chunk_id", "")),
+                                document_id="",
+                                content=str(item.get("supporting_text", "")),
+                                score=float(item.get("similarity") or 0.0),
+                                metadata={
+                                    "kpi_metric_name": item.get("metric_name"),
+                                    "kpi_value": item.get("value"),
+                                    "kpi_year": item.get("year"),
+                                    "kpi_category": item.get("category"),
+                                    "retrieval_source": "sql_kpi_search",
+                                },
+                                document_title=str(item.get("document_title", "")),
+                                document_source=str(item.get("document_source", "")),
+                            )
                         elif isinstance(item, dict):
                             # The agent's tool wrappers in agent.py
                             # intentionally strip document_id and metadata
@@ -599,6 +628,54 @@ async def search_hybrid(request: SearchRequest):
         
     except Exception as e:
         logger.error(f"Hybrid search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/search/sql", response_model=KpiSearchResponse)
+async def search_sql(request: SearchRequest):
+    """Structured KPI lookup endpoint.
+
+    Mirrors the shape of /search/vector and /search/hybrid so the
+    eval framework can hit it via a uniform Strategy adapter. The
+    request `query` is treated as a metric_name lookup; future
+    extensions (year/category filters) can be added via filters.
+    """
+    try:
+        target_year = None
+        target_category = None
+        if isinstance(request.filters, dict):
+            year_val = request.filters.get("year")
+            if year_val is not None:
+                try:
+                    target_year = int(year_val)
+                except (TypeError, ValueError):
+                    target_year = None
+            cat_val = request.filters.get("category")
+            if isinstance(cat_val, str) and cat_val:
+                target_category = cat_val
+
+        input_data = KpiSearchInput(
+            query=request.query,
+            year=target_year,
+            category=target_category,
+            limit=request.limit,
+        )
+
+        start_time = datetime.now()
+        results = await sql_kpi_search_tool(input_data)
+        end_time = datetime.now()
+
+        query_time = (end_time - start_time).total_seconds() * 1000
+
+        return KpiSearchResponse(
+            results=results,
+            total_results=len(results),
+            search_type="sql",
+            query_time_ms=query_time,
+        )
+
+    except Exception as e:
+        logger.error(f"SQL KPI search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

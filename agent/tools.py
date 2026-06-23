@@ -8,11 +8,12 @@ from dotenv import load_dotenv
 from .db_utils import (
     vector_search,
     hybrid_search,
+    sql_kpi_search,
     get_document,
     list_documents,
-    get_document_chunks
+    get_document_chunks,
 )
-from .models import ChunkResult, DocumentMetadata
+from .models import ChunkResult, DocumentMetadata, KpiFactResult
 from .providers import get_embedding_client, get_embedding_model
 
 # Load environment variables
@@ -55,6 +56,13 @@ class HybridSearchInput(BaseModel):
     query: str = Field(..., description="Search query")
     limit: int = Field(default=10, description="Maximum number of results")
     text_weight: float = Field(default=0.3, description="Weight for text similarity (0-1)")
+class KpiSearchInput(BaseModel):
+    """Input for the structured KPI lookup tool."""
+    query: str = Field(..., description="Metric name or short noun phrase to look up, e.g. 'waste recycling rate'")
+    year: Optional[int] = Field(default=None, description="Optional year filter (target year or reporting year)")
+    category: Optional[str] = Field(default=None, description="Optional category filter (emissions, waste, diversity, etc.)")
+    limit: int = Field(default=10, description="Maximum number of facts to return")
+    min_similarity: float = Field(default=0.10, description="Minimum trigram similarity on metric_name (0.0-1.0)")
 class DocumentInput(BaseModel):
     """Input for document retrieval."""
     document_id: str = Field(..., description="Document ID to retrieve")
@@ -140,6 +148,46 @@ async def hybrid_search_tool(input_data: HybridSearchInput) -> List[ChunkResult]
         
     except Exception as e:
         logger.error(f"Hybrid search failed: {e}")
+        return []
+
+async def sql_kpi_search_tool(input_data: KpiSearchInput) -> List[KpiFactResult]:
+    """Look up structured KPI facts via the search_kpi_facts SQL function.
+
+    Returns KpiFactResult objects that pair the structured row with
+    the source chunk content. The agent can both quote the value and
+    cite the chunk; the eval framework projects source_chunk_id into
+    its retrieval metrics.
+    """
+    try:
+        results = await sql_kpi_search(
+            query_text=input_data.query,
+            target_year=input_data.year,
+            target_category=input_data.category,
+            limit=input_data.limit,
+            min_similarity=input_data.min_similarity,
+        )
+
+        return [
+            KpiFactResult(
+                fact_id=str(r["fact_id"]),
+                metric_name=r["metric_name"],
+                value=r["value"],
+                unit=r.get("unit"),
+                year=r.get("year"),
+                scope=r.get("scope"),
+                baseline_year=r.get("baseline_year"),
+                category=r.get("category"),
+                similarity=float(r.get("similarity") or 0.0),
+                source_chunk_id=str(r["source_chunk_id"]),
+                source_document_id=str(r["source_document_id"]),
+                chunk_content=r["chunk_content"],
+                document_title=r["document_title"],
+                document_source=r["document_source"],
+            )
+            for r in results
+        ]
+    except Exception as e:
+        logger.error(f"SQL KPI search failed: {e}")
         return []
 
 async def get_document_tool(input_data: DocumentInput) -> Optional[Dict[str, Any]]:

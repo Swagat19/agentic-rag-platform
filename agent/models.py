@@ -24,11 +24,42 @@ class ChunkResult(BaseModel):
     def validate_score(cls, v: float) -> float:
         """Ensure score is between 0 and 1."""
         return max(0.0, min(1.0, v))
+class KpiFactResult(BaseModel):
+    """Single row from kpi_facts joined with its source chunk.
+
+    Returned by the agent's sql_kpi_search tool. Carries both the
+    structured fact and a back-reference to the chunk it was derived
+    from so the eval framework can project these results onto the
+    existing chunk-level retrieval metrics.
+    """
+    fact_id: str
+    metric_name: str
+    value: str
+    unit: Optional[str] = None
+    year: Optional[int] = None
+    scope: Optional[str] = None
+    baseline_year: Optional[int] = None
+    category: Optional[str] = None
+    similarity: float = 0.0
+    source_chunk_id: str
+    source_document_id: str
+    chunk_content: str
+    document_title: str
+    document_source: str
+
 class SearchResponse(BaseModel):
     """Search response model."""
     results: List[ChunkResult] = Field(default_factory=list)
     total_results: int = 0
     search_type: SearchType
+    query_time_ms: float
+
+
+class KpiSearchResponse(BaseModel):
+    """SQL KPI search response model."""
+    results: List[KpiFactResult] = Field(default_factory=list)
+    total_results: int = 0
+    search_type: Literal["sql"] = "sql"
     query_time_ms: float
 
 # Request Models
