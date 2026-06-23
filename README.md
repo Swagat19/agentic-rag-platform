@@ -23,7 +23,10 @@ answer-quality across heterogeneous data sources.
   matching with optional year and category filters. Each row is foreign-keyed
   to its source chunk, so the agent can cite both the structured value and the
   surrounding text.
-- **Retrieval evaluation framework.** A pre-registered micro-benchmark with a
+- **Retrieval evaluation framework.** A pre-registered benchmark
+  (25 questions across factoid, multi-hop, table-lookup, and negative
+  categories — gold chunk IDs bootstrapped via deterministic SQL ILIKE
+  matching, *not* via the SQL feature itself, so the eval stays fair) with a
   CLI runner that measures `recall@k`, `precision@k`, `MRR`, and `numeric_match`
   across vector, hybrid, SQL, and chat strategies, plus an opt-in LLM-as-judge
   for `faithfulness` and `answer_relevance`. Reports are timestamped markdown
@@ -45,22 +48,46 @@ answer-quality across heterogeneous data sources.
 ## Results: SQL-as-tool vs vector / hybrid
 
 Reproduced via `python -m eval.run_eval --strategy {vector,hybrid,sql} --k 5`
-against the v0 micro-benchmark (5 questions across factoid, multi-hop,
-table-lookup, and negative categories) on the NTT DATA Sustainability Report 2024 corpus.
+against the 25-question benchmark on the NTT DATA Sustainability Report 2024 corpus.
 
 | Strategy           | recall@5 | precision@5 |  MRR  | avg latency |
 | ------------------ | :------: | :---------: | :---: | :---------: |
-| `vector` (upstream)|  0.750   |    0.250    | 0.500 |   234 ms    |
-| `hybrid` (upstream)|  0.750   |    0.250    | 0.500 |    91 ms    |
-| **`sql`** (new)    | **0.875**|  **0.500**  |**0.600**|  **7 ms** |
+| `vector` (upstream)|  0.455   |    0.173    | 0.540 |    47 ms    |
+| `hybrid` (upstream)|  0.455   |    0.173    | 0.540 |    98 ms    |
+| **`sql`** (new)    |  0.364   |  **0.255**  | 0.361 |   **6 ms**  |
 
-**Headline:** the table-lookup question (`waste-recycling-target`, asking for an
-explicit numeric target buried in a dense KPI table) scored **0.000 recall@5**
-on both vector and hybrid retrieval and **0.500** on SQL. Precision doubled
-across the whole benchmark, and SQL latency is an order of magnitude lower
-because it skips the embedding round-trip.
+**Where SQL wins (the intended trade-off):**
 
-Run artifacts in `eval/results/2026-06-23T10-19-*__*__k5.{md,json}`.
+| Category     | n  | vector recall@5 | hybrid recall@5 | sql recall@5 |
+| ------------ | :-:| :-------------: | :-------------: | :----------: |
+| factoid      | 10 |      0.600      |      0.600      |    0.400     |
+| multi-hop    |  6 |      0.500      |      0.500      |  **0.583**   |
+| table-lookup |  6 |      0.167      |      0.167      |    0.083     |
+
+- **SQL has the highest precision (0.255 vs 0.173)**: when it returns
+  something, it's relevant — there are no off-topic prose paragraphs in
+  `kpi_facts`.
+- **SQL is 8× faster than vector and 16× faster than hybrid** (6 ms vs
+  47–98 ms): no embedding round-trip, just a trigram-similar SELECT.
+- **SQL wins recall@5 on multi-hop (0.583 vs 0.500)**: comparing two related
+  KPIs (e.g. "Scope 1+2 vs Scope 3 reduction targets") is exactly what a
+  structured table is good at.
+- **SQL trails on factoid recall (0.400 vs 0.600)**: conceptual questions
+  (which framework certifies our targets? which standard guides materiality?)
+  are not numeric KPIs and were not extracted into `kpi_facts`. SQL coverage
+  is bounded by what the extractor surfaced — this is a real limitation, not
+  a tuning artefact.
+- **An honest negative result: hybrid offered no upside over pure vector
+  at this scale** (identical recall and MRR, 2× the latency). The micro-eval's
+  apparent hybrid advantage didn't survive a larger benchmark.
+- **Table-lookup is the hardest category for everyone.** The canonical
+  "FY2024 KPI table" gold chunk is ~37 k characters, so its embedding is
+  diluted (vector / hybrid miss it) and the LLM extractor often associates
+  facts with smaller, more specific neighbouring chunks (mismatching the
+  big-table gold). This is a real signal that the next improvement is
+  table-aware chunking, not a different retriever.
+
+Run artifacts in `eval/results/2026-06-23T11-49-*__*__k5.{md,json}`.
 
 ### How the structured layer is built
 

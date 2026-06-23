@@ -27,7 +27,8 @@ shared scorecard.
 eval/
   benchmark.yaml      # the question set, with ground-truth signals
   metrics.py          # pure functions: recall@k, MRR, numeric-match, ...
-  strategies.py       # adapters for vector / hybrid / chat / (later) sql
+  strategies.py       # adapters for vector / hybrid / sql / chat
+  judge.py            # LLM-as-judge with on-disk content-hash cache
   run_eval.py         # CLI runner; outputs markdown + JSON to results/
   results/            # gitignored timestamped run outputs
   README.md
@@ -42,7 +43,8 @@ stack must be up:
 make up
 docker exec agent_api python -m eval.run_eval --strategy vector --k 5
 docker exec agent_api python -m eval.run_eval --strategy hybrid --k 5
-docker exec agent_api python -m eval.run_eval --strategy chat   --k 5
+docker exec agent_api python -m eval.run_eval --strategy sql    --k 5
+docker exec agent_api python -m eval.run_eval --strategy chat   --k 5 --judge
 ```
 
 Each invocation prints a markdown report to stdout and (unless
@@ -58,28 +60,31 @@ side-by-side comparable.
 | precision@k | retrieval | Fraction of the top-k retrieved chunks that are gold. Reported only when strict gold IDs are available. |
 | MRR | retrieval | Mean of 1/rank of the first gold hit per question. Punishes putting the right chunk at rank 5 instead of rank 1. |
 | numeric-match | answer | For chat-style runs, the fraction of `expected_numbers` from the benchmark that appear in the agent's final answer. Lexical comparison, percent-aware. |
-| faithfulness *(planned)* | answer | LLM-judged: does every claim in the answer have support in the retrieved chunks? Penalises hallucinations even when they happen to be correct. |
-| answer relevance *(planned)* | answer | LLM-judged: does the answer actually address the question that was asked? |
+| faithfulness | answer | LLM-judged via `judge.py` (`--judge` flag on the runner): does every claim in the answer have support in the retrieved chunks? Penalises hallucinations even when they happen to be correct. Cached on a content hash so reruns are free. |
+| answer relevance | answer | LLM-judged via `judge.py`: does the answer actually address the question that was asked? |
 
 ### Ground-truth signals
 
 Each question in `benchmark.yaml` carries up to three signals:
 
 * `gold_chunk_ids` — the strict signal: UUIDs of chunks that contain the
-  answer. Populated by a one-time human pass over the corpus. Empty
-  until that pass is done.
+  answer. Bootstrapped semi-automatically by `scripts/label_gold_ids.py`,
+  which probes the `chunks` table directly with `ILIKE` over the
+  question's keywords and expected numbers. The labelling never consults
+  `kpi_facts` or runs the agent, so the gold IDs are independent of the
+  SQL-as-tool feature being measured.
 * `gold_chunk_keywords` — the loose signal: a list of substrings that
-  must all appear (case-insensitive) in a gold chunk. Easy to author,
-  noisier than IDs, but sufficient to validate the framework end-to-end
-  before the labelling pass.
+  must all appear (case-insensitive) in a gold chunk. Used as a fallback
+  for negative questions (no strict gold) and as a sanity check for the
+  ILIKE bootstrap.
 * `expected_numbers` — used only for `numeric-match`. Kept separate
   from keywords so the lexical answer scoring isn't pulled toward
   retrieval signals.
 
 The runner prefers `gold_chunk_ids` when present and falls back to
-`gold_chunk_keywords` otherwise. This means we can grow the benchmark
-incrementally: new questions land in keyword-mode and get upgraded to
-ID-mode as time permits.
+`gold_chunk_keywords` otherwise. The current benchmark has 22 of 25
+questions ID-labelled (the remaining three are intentionally
+"unanswerable" negatives where the LLM judge grades refusal instead).
 
 ## Anti-bias design
 
@@ -122,14 +127,3 @@ is structured to make that hard:
 The result is a measurement harness whose conclusions a reviewer can
 trust: not because the framework is exhaustive, but because the design
 choices are visible and auditable.
-
-## Roadmap (in this repo)
-
-* `judge.py` — LLM-as-judge for faithfulness and answer relevance, with
-  per-(question, answer) caching keyed on a content hash.
-* Strict ID-level gold labelling for the existing 5 questions, then
-  expansion to ~25 questions across the full document set.
-* `sql` strategy adapter, once the structured-retrieval feature lands.
-* Side-by-side report (`run_eval.py --compare vector hybrid sql`) that
-  emits a single markdown table contrasting all strategies on the same
-  benchmark, suitable for dropping straight into the project README.

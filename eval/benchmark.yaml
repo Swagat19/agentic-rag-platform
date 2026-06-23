@@ -1,19 +1,23 @@
-# Eval benchmark — micro set (v0).
+# Eval benchmark — v1 (25 questions).
 #
 # Authoring rules (see eval/README.md for full rationale):
-#   * Questions are written without reference to the SQL-as-tool feature.
-#   * Each question is sourced from a generic ESG/sustainability analyst's
-#     viewpoint or directly from the report's table of contents.
-#     Questions are NOT chosen because we expect a particular strategy to
-#     win on them.
-#   * `gold_chunk_keywords` is the loose ground-truth: a chunk that contains
-#     ALL these keywords (case-insensitive substring) is treated as gold.
-#     Strict ID-level labelling will populate `gold_chunk_ids` later.
-#   * `expected_numbers` is used for numeric_match scoring of /chat answers.
-#     Leave empty for non-numeric or definitional questions.
-#   * `category` reports per-category metrics so we can see whether a
-#     change helped some question types and hurt others, instead of hiding
-#     trade-offs in a single aggregate number.
+#   * Questions are written without reference to the SQL-as-tool feature
+#     or to the kpi_facts table contents. They are framed as a generic
+#     ESG / sustainability analyst would phrase them.
+#   * Distribution across categories is fixed up front (10 factoid,
+#     6 multi-hop, 6 table-lookup, 3 negative) so per-category metrics
+#     stay stable across runs.
+#   * `gold_chunk_keywords` is the loose ground-truth: a chunk that
+#     contains ALL these keywords (case-insensitive substring) is
+#     treated as gold by the keyword fallback metric.
+#   * `gold_chunk_ids` is the strict ground-truth, bootstrapped by
+#     running each question through /search/hybrid at k=8 and
+#     inspecting the top chunks. The labelling rationale is captured
+#     in YAML comments so the labels are auditable.
+#   * `expected_numbers` is used for numeric_match scoring of /chat
+#     answers. Leave empty for non-numeric or definitional questions.
+#   * Negative questions intentionally have empty gold lists; the
+#     LLM judge grades whether the agent refuses cleanly instead.
 
 corpus:
   description: "NTT DATA Sustainability Report 2024 (sr2024.pdf) only"
@@ -21,15 +25,15 @@ corpus:
     - sr2024
 
 questions:
+
+  # ---------------------------------------------------------------
+  # Factoid (10) -- direct lookup of a single specific fact
+  # ---------------------------------------------------------------
+
   - id: scope12-target-2030
     category: factoid
     question: "By what percentage does NTT DATA aim to reduce Scope 1 and 2 GHG emissions by fiscal 2030, compared with what baseline year?"
     gold_chunk_keywords: ["68", "Scope 1", "fiscal 2021"]
-    # Bootstrapped 2026-06-22 by /search/hybrid + manual content inspection.
-    # e0ed8e3f is the prose chunk with the full SBTi sentence ("68% reduction
-    # in Scope 1 and 2 ... compared with fiscal 2021"). 066b8eda is a tabular
-    # chunk listing the same target ("Scope 1 and 2: Reduce by 68%") and is
-    # accepted as gold because it independently answers the question.
     gold_chunk_ids:
       - "e0ed8e3f-460d-4f53-93dd-6c8203e344d4"
       - "066b8eda-71f4-4405-be8d-c2da1dfbec10"
@@ -44,38 +48,248 @@ questions:
       - "066b8eda-71f4-4405-be8d-c2da1dfbec10"
     expected_numbers: ["42", "2030"]
 
+  - id: sbti-framework
+    category: factoid
+    question: "Which framework certifies NTT DATA's emissions-reduction targets?"
+    gold_chunk_keywords: ["SBTi"]
+    # Bootstrapped 2026-06-23 by ILIKE-matching "SBTi" across all chunks.
+    # a4faf210 is the GHG-strategy narrative; e0ed8e3f is the
+    # remuneration-tied-to-emissions chunk that explicitly cites SBTi.
+    gold_chunk_ids:
+      - "a4faf210-ce57-4c47-b103-c81f878b193b"
+      - "e0ed8e3f-460d-4f53-93dd-6c8203e344d4"
+    expected_numbers: []
+
+  - id: paper-reduction-target
+    category: factoid
+    question: "By what percentage does NTT DATA aim to reduce paper consumption, and from what baseline year?"
+    gold_chunk_keywords: ["paper", "40"]
+    # 3acdee72 is the FY2024 progress / targets table that lists "Paper
+    # consumption: 40% reduction (from FY2020)". b69472f7 is the data
+    # book chunk with the same row in raw tabular form.
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "b69472f7-8f0e-4947-954e-a19a5c5f4516"
+    expected_numbers: ["40", "2020"]
+
+  - id: female-managers-target-2025
+    category: factoid
+    question: "What is NTT DATA's target for the ratio of female managers by the end of fiscal 2025?"
+    gold_chunk_keywords: ["female managers", "15"]
+    # 3acdee72 (FY2024 table) and a77c4dae (women-in-leadership chunk)
+    # both state the 15% by FY2025 target.
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "a77c4dae-0a9b-44af-a822-9595ca2a690d"
+    expected_numbers: ["15"]
+
+  - id: childcare-leave-target
+    category: factoid
+    question: "What target does NTT DATA set for the ratio of male employees taking childcare leave?"
+    gold_chunk_keywords: ["childcare", "100"]
+    # 3acdee72 (FY2024 table) lists the 100% childcare-leave target;
+    # 2f78487a is the data-book chunk with the same row.
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "2f78487a-3763-4182-8ec8-8b308fd5ccdc"
+    expected_numbers: ["100"]
+
+  - id: external-hiring-fy2023
+    category: factoid
+    question: "What was NTT DATA's external hiring ratio achievement in fiscal 2023?"
+    gold_chunk_keywords: ["external hiring", "45.6"]
+    # ILIKE matched only two chunks for "external hiring" + "45.6".
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "a77c4dae-0a9b-44af-a822-9595ca2a690d"
+    expected_numbers: ["45.6"]
+
+  - id: human-rights-violations-fy2023
+    category: factoid
+    question: "How many confirmed human rights violations did NTT DATA report in fiscal 2023?"
+    gold_chunk_keywords: ["human rights violations"]
+    # 3acdee72 (FY2024 table) and ca0607a3 (the human-rights /
+    # accessibility narrative chunk) both report the FY2023 count of 1.
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "ca0607a3-4b1e-4802-8ea3-0f849eb0c96e"
+    expected_numbers: ["1"]
+
+  - id: turnover-rate-fy2023
+    category: factoid
+    question: "What was NTT DATA's employee turnover rate in fiscal 2023?"
+    gold_chunk_keywords: ["turnover", "3.0"]
+    # ILIKE matched only two chunks for "turnover" + "3.0".
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "2f78487a-3763-4182-8ec8-8b308fd5ccdc"
+    expected_numbers: ["3.0"]
+
+  - id: materiality-framework
+    category: factoid
+    question: "Which global standard guides NTT DATA's materiality identification process?"
+    gold_chunk_keywords: ["GRI"]
+    # 3acdee72 names "GRI, a global guideline" inside the materiality
+    # determination section. 72110c1e is a scope-of-coverage chunk that
+    # also references GRI alignment.
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "72110c1e-b946-44f8-8ece-4b7f5e1e17cd"
+    expected_numbers: []
+
+  # ---------------------------------------------------------------
+  # Multi-hop (6) -- requires combining two or more facts
+  # ---------------------------------------------------------------
+
   - id: net-zero-roadmap
     category: multi-hop
     question: "By what year does NTT DATA plan to reach net-zero emissions for Scope 1 and 2, and by what year for all scopes (Scope 1, 2, and 3)?"
     gold_chunk_keywords: ["net-zero"]
-    # Both years (2035 for Scope 1+2, 2040 for all scopes) appear in the
-    # same chunk -- this question is multi-fact but single-chunk on this
-    # corpus, so a single gold ID is appropriate here.
     gold_chunk_ids:
       - "066b8eda-71f4-4405-be8d-c2da1dfbec10"
     expected_numbers: ["2035", "2040"]
+
+  - id: scope-reduction-comparison
+    category: multi-hop
+    question: "Comparing NTT DATA's targets, is the percentage reduction larger for Scope 1+2 emissions or for Scope 3 emissions by fiscal 2030?"
+    gold_chunk_keywords: ["68", "42"]
+    # 066b8eda is the canonical line "Scope 1 and 2: Reduce by 68% ...
+    # Scope 3: Reduce by 42%". e0ed8e3f also contains both percentages
+    # in the remuneration-tied-to-emissions context.
+    gold_chunk_ids:
+      - "066b8eda-71f4-4405-be8d-c2da1dfbec10"
+      - "e0ed8e3f-460d-4f53-93dd-6c8203e344d4"
+    expected_numbers: ["68", "42"]
+
+  - id: female-managers-progress
+    category: multi-hop
+    question: "What was the ratio of female managers in fiscal 2023, and what is the target for end of fiscal 2025?"
+    gold_chunk_keywords: ["female managers"]
+    # Both 3acdee72 and a77c4dae contain "10.8%" achieved + "15%" target
+    # adjacent to the female-managers row.
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "a77c4dae-0a9b-44af-a822-9595ca2a690d"
+    expected_numbers: ["10.8", "15"]
+
+  - id: waste-recycling-types
+    category: multi-hop
+    question: "What is the difference between NTT DATA's recycling-rate target for general/industrial waste and for construction waste?"
+    gold_chunk_keywords: ["construction", "99"]
+    # 3acdee72 is the FY2024 table (general/industrial 99%, construction
+    # 87%). 9c44f330 is the surrounding prose chunk.
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "9c44f330-5aa3-4afb-b1f0-2b176075947b"
+    expected_numbers: ["99", "87"]
+
+  - id: female-directors-progress
+    category: multi-hop
+    question: "What was the ratio of female directors in fiscal 2023 and what is the target by end of fiscal 2025?"
+    gold_chunk_keywords: ["female directors"]
+    # ILIKE matched only two chunks for "female directors" + "22.7" + "25".
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "a77c4dae-0a9b-44af-a822-9595ca2a690d"
+    expected_numbers: ["22.7", "25"]
+
+  - id: scope12-vs-scope3-emissions-fy2023
+    category: multi-hop
+    question: "What were NTT DATA's actual Scope 1 and Scope 2 GHG emissions in fiscal 2023?"
+    gold_chunk_keywords: ["Scope 1", "Scope 2", "39,507"]
+    # 3acdee72 (FY2024 table) is the only chunk that contains the FY2023
+    # tabular row with "Scope 1: 39,507 t-CO2 / Scope 2: 307,009 t-CO2".
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+    expected_numbers: ["39,507", "307,009"]
+
+  # ---------------------------------------------------------------
+  # Table-lookup (6) -- the answer lives in a dense KPI table
+  # ---------------------------------------------------------------
 
   - id: waste-recycling-target
     category: table-lookup
     question: "What is NTT DATA's target for general and industrial waste recycling rate, and what was the fiscal 2023 achievement?"
     gold_chunk_keywords: ["waste", "recycling", "99"]
-    # 3acdee72 is the table row containing "Waste recycling rate | General
-    # and industrial waste: 99% or more". 9c44f330 is the surrounding prose
-    # / table fragment that also contains the FY2023 achievement number.
     gold_chunk_ids:
       - "3acdee72-676b-4359-9dbd-09350c61a625"
       - "9c44f330-5aa3-4afb-b1f0-2b176075947b"
     expected_numbers: ["99"]
 
+  - id: remote-working-fy2023
+    category: table-lookup
+    question: "What was NTT DATA's ratio of remote working in fiscal 2023?"
+    gold_chunk_keywords: ["remote", "63.2"]
+    # 3acdee72 (FY2024 table) and 2f78487a (data book) both contain
+    # the "Ratio of remote working" row with 63.2% achieved.
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "2f78487a-3763-4182-8ec8-8b308fd5ccdc"
+    expected_numbers: ["63.2"]
+
+  - id: bribery-violations-fy2023
+    category: table-lookup
+    question: "How many anti-competitive or bribery violations did NTT DATA confirm in fiscal 2023?"
+    gold_chunk_keywords: ["anti-competitive"]
+    # 3acdee72 (FY2024 table) and 900528e8 (compliance reports detail).
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "900528e8-9aa2-414d-8bc2-63c3c6c3390a"
+    expected_numbers: ["0"]
+
+  - id: compliance-training-target
+    category: table-lookup
+    question: "What is NTT DATA's target participation rate for compliance internet-based training (IBT)?"
+    gold_chunk_keywords: ["IBT", "100"]
+    # 3acdee72 lists the "Compliance IBT participation rate -> 100%"
+    # target row directly.
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+    expected_numbers: ["100"]
+
+  - id: workshop-participation-target
+    category: table-lookup
+    question: "What employee participation rate target does NTT DATA set for sustainability workshops in fiscal 2024?"
+    gold_chunk_keywords: ["workshop", "80"]
+    # 3acdee72 lists the workshop / external-support participation
+    # target of 80% under the FY2024 indicators column.
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+    expected_numbers: ["80"]
+
+  - id: supplier-engagement-fy2023
+    category: table-lookup
+    question: "What ratio of direct communication with important suppliers did NTT DATA achieve in fiscal 2023?"
+    gold_chunk_keywords: ["suppliers", "100"]
+    # 3acdee72 (FY2024 table) and a0d07cd7 (supplier-engagement
+    # narrative) both report the 100% direct-communication achievement.
+    gold_chunk_ids:
+      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "a0d07cd7-bd0b-4e00-9513-fc633ebd9057"
+    expected_numbers: ["100"]
+
+  # ---------------------------------------------------------------
+  # Negative (3) -- the report does not state this; honest "I don't
+  # know" is the right answer. LLM judge grades refusal vs hallucination.
+  # ---------------------------------------------------------------
+
   - id: ceo-personal-salary
     category: negative
     question: "What is NTT DATA's CEO's personal annual salary in US dollars?"
-    # A sustainability report is unlikely to disclose a specific personal
-    # CEO salary in USD. The "right" behaviour here is for retrieval to
-    # return weak/off-topic chunks AND for /chat to either decline to
-    # answer or admit the report doesn't say. Both gold_chunk_keywords
-    # and expected_numbers are intentionally empty: keyword recall will
-    # therefore be 0 by construction, and numeric_match is not scored.
+    gold_chunk_keywords: []
+    gold_chunk_ids: []
+    expected_numbers: []
+
+  - id: stock-price-eoy-2023
+    category: negative
+    question: "What was NTT DATA's exact stock price on December 31, 2023?"
+    gold_chunk_keywords: []
+    gold_chunk_ids: []
+    expected_numbers: []
+
+  - id: audit-committee-chair-name
+    category: negative
+    question: "What is the full name of the chairperson of NTT DATA's audit committee?"
     gold_chunk_keywords: []
     gold_chunk_ids: []
     expected_numbers: []
