@@ -81,6 +81,13 @@ def score_question(
         precision = None
         rr = 0.0
 
+    # Chunking-agnostic recall: always compute when keywords exist, even
+    # if gold_chunk_ids are also present. This lets us notice when ID
+    # recall drops simply because chunk UUIDs changed but the answer is
+    # still findable elsewhere.
+    content_recall = keyword_recall_at_k(chunks, keywords, k) if keywords else None
+    content_rr = keyword_reciprocal_rank(chunks, keywords) if keywords else None
+
     nmatch: Optional[float] = None
     if answer is not None and expected_numbers:
         nmatch = numeric_match(answer, expected_numbers)
@@ -91,6 +98,8 @@ def score_question(
         recall_at_k=recall,
         precision_at_k=precision,
         reciprocal_rank=rr,
+        content_recall_at_k=content_recall,
+        content_reciprocal_rank=content_rr,
         numeric_match=nmatch,
         latency_ms=latency_ms,
         answer=answer,
@@ -125,15 +134,17 @@ def render_markdown(
     lines.append("## Overall")
     lines.append("")
     lines.append(
-        "| n | recall@k | precision@k | MRR | numeric-match | faithfulness | relevance | avg latency (ms) |"
+        "| n | recall@k | content-recall@k | precision@k | MRR | content-MRR | numeric-match | faithfulness | relevance | avg latency (ms) |"
     )
-    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|")
     lines.append(
-        "| {n} | {r} | {p} | {m} | {nm} | {f} | {rel} | {lat} |".format(
+        "| {n} | {r} | {cr} | {p} | {m} | {cm} | {nm} | {f} | {rel} | {lat} |".format(
             n=overall["n"],
             r=_fmt(overall["recall_at_k"]),
+            cr=_fmt(overall.get("content_recall_at_k")),
             p=_fmt(overall["precision_at_k"]),
             m=_fmt(overall["mrr"]),
+            cm=_fmt(overall.get("content_mrr")),
             nm=_fmt(overall["numeric_match"]),
             f=_fmt(overall.get("faithfulness")),
             rel=_fmt(overall.get("answer_relevance")),
@@ -145,15 +156,16 @@ def render_markdown(
     lines.append("## Per category")
     lines.append("")
     lines.append(
-        "| category | n | recall@k | precision@k | MRR | numeric-match | faithfulness | relevance |"
+        "| category | n | recall@k | content-recall@k | precision@k | MRR | numeric-match | faithfulness | relevance |"
     )
-    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
     for cat, b in sorted(summary["by_category"].items()):
         lines.append(
-            "| {c} | {n} | {r} | {p} | {m} | {nm} | {f} | {rel} |".format(
+            "| {c} | {n} | {r} | {cr} | {p} | {m} | {nm} | {f} | {rel} |".format(
                 c=cat,
                 n=b["n"],
                 r=_fmt(b["recall_at_k"]),
+                cr=_fmt(b.get("content_recall_at_k")),
                 p=_fmt(b["precision_at_k"]),
                 m=_fmt(b["mrr"]),
                 nm=_fmt(b["numeric_match"]),

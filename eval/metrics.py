@@ -153,6 +153,13 @@ class QuestionScore:
     faithfulness: Optional[float] = None
     answer_relevance: Optional[float] = None
     judge_cached: bool = False
+    # Chunking-agnostic recall: did any top-k chunk's *content* contain
+    # all the answer keywords (regardless of chunk UUID)? Reported
+    # alongside the strict ID-based `recall_at_k` so a change in
+    # chunking that produces different but still-answer-containing
+    # chunks doesn't look like a regression.
+    content_recall_at_k: Optional[float] = None
+    content_reciprocal_rank: Optional[float] = None
 
 
 def aggregate(scores: Sequence[QuestionScore]) -> dict:
@@ -167,6 +174,12 @@ def aggregate(scores: Sequence[QuestionScore]) -> dict:
         "recall_at_k": _mean([s.recall_at_k for s in scores if s.recall_at_k is not None]),
         "precision_at_k": _mean([s.precision_at_k for s in scores if s.precision_at_k is not None]),
         "mrr": _mean([s.reciprocal_rank for s in scores]),
+        "content_recall_at_k": _mean(
+            [s.content_recall_at_k for s in scores if s.content_recall_at_k is not None]
+        ),
+        "content_mrr": _mean(
+            [s.content_reciprocal_rank for s in scores if s.content_reciprocal_rank is not None]
+        ),
         "numeric_match": _mean([s.numeric_match for s in scores if s.numeric_match is not None]),
         "faithfulness": _mean([s.faithfulness for s in scores if s.faithfulness is not None]),
         "answer_relevance": _mean([s.answer_relevance for s in scores if s.answer_relevance is not None]),
@@ -179,6 +192,7 @@ def aggregate(scores: Sequence[QuestionScore]) -> dict:
             s.category,
             {
                 "n": 0, "recall": [], "precision": [], "rr": [],
+                "c_recall": [], "c_rr": [],
                 "numeric": [], "faith": [], "rel": [],
             },
         )
@@ -188,6 +202,10 @@ def aggregate(scores: Sequence[QuestionScore]) -> dict:
         if s.precision_at_k is not None:
             bucket["precision"].append(s.precision_at_k)
         bucket["rr"].append(s.reciprocal_rank)
+        if s.content_recall_at_k is not None:
+            bucket["c_recall"].append(s.content_recall_at_k)
+        if s.content_reciprocal_rank is not None:
+            bucket["c_rr"].append(s.content_reciprocal_rank)
         if s.numeric_match is not None:
             bucket["numeric"].append(s.numeric_match)
         if s.faithfulness is not None:
@@ -201,6 +219,8 @@ def aggregate(scores: Sequence[QuestionScore]) -> dict:
             "recall_at_k": _mean(b["recall"]),
             "precision_at_k": _mean(b["precision"]),
             "mrr": _mean(b["rr"]),
+            "content_recall_at_k": _mean(b["c_recall"]),
+            "content_mrr": _mean(b["c_rr"]),
             "numeric_match": _mean(b["numeric"]),
             "faithfulness": _mean(b["faith"]),
             "answer_relevance": _mean(b["rel"]),

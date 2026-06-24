@@ -1,215 +1,375 @@
-# Agentic RAG Platform with Hybrid Retrieval and Evaluation
+# Agentic RAG Platform with Structured + Unstructured Retrieval
 
-An agentic Retrieval-Augmented Generation system built on Pydantic AI and FastAPI,
-extending the base architecture with hybrid structured + unstructured retrieval
-(SQL-as-a-tool) and a reproducible evaluation suite that measures retrieval and
-answer-quality across heterogeneous data sources.
+A chat-with-your-PDFs system. You drop in PDFs (sustainability reports,
+annual reports, anything with tables of numbers), an LLM agent answers
+questions about them, and a small evaluation framework actually measures
+how well it does.
 
-> **Attribution.** This project is built on top of
-> [serkanyasr/agentic_rag_project](https://github.com/serkanyasr/agentic_rag_project),
-> which provides the base architecture (Pydantic AI agent, FastAPI server, pgvector
-> storage, hybrid text + vector search, Docling-based ingestion, Streamlit UI). My
-> contributions are listed below; the rest is upstream code I am studying,
-> extending, and operating.
+> Built on top of [serkanyasr/agentic_rag_project](https://github.com/serkanyasr/agentic_rag_project)
+> (the agent, the FastAPI server, pgvector storage, hybrid text + vector
+> search, Docling-based ingestion, Streamlit UI). My additions are listed
+> in the "What I added" section below.
 
 ---
 
-## My Contributions
+## The problem I set out to fix
 
-- **Hybrid structured + unstructured retrieval.** Added a second searchable
-  surface alongside the chunk index: a Postgres `kpi_facts` table populated by
-  an LLM-driven extraction pass over ingested chunks, and a new
-  `sql_kpi_search` agent tool that queries it via trigram-similar metric-name
-  matching with optional year and category filters. Each row is foreign-keyed
-  to its source chunk, so the agent can cite both the structured value and the
-  surrounding text.
-- **Retrieval evaluation framework.** A pre-registered benchmark
-  (25 questions across factoid, multi-hop, table-lookup, and negative
-  categories — gold chunk IDs bootstrapped via deterministic SQL ILIKE
-  matching, *not* via the SQL feature itself, so the eval stays fair) with a
-  CLI runner that measures `recall@k`, `precision@k`, `MRR`, and `numeric_match`
-  across vector, hybrid, SQL, and chat strategies, plus an opt-in LLM-as-judge
-  for `faithfulness` and `answer_relevance`. Reports are timestamped markdown
-  + JSON, with anti-bias guarantees documented in `eval/README.md` (external
-  question sourcing, per-category reporting, distinct judge model, content-hashed
-  judge cache so reruns are free).
-- **Provider-pluggable agent runtime.** `OPENAI_BASE_URL` plumbing so the
-  whole stack (chat agent, embeddings, KPI extraction, judge) runs against
-  Ollama, OpenAI, Groq, vLLM, or any OpenAI-compatible endpoint with zero code
-  changes. Embedding dimension is configurable to match local providers
-  (e.g. 768 for Ollama `nomic-embed-text`, 1536 for OpenAI `text-embedding-3-small`).
-- **Dev tooling.** Makefile wrapper that neutralises shell-env pollution
-  (`DB_USER`, `DB_PASSWORD`, etc. set by user shells override `.env`); Dockerfile
-  pinned to the Python version `pyproject.toml` actually requires; system-graphics
-  libraries added so Docling renders PDFs in `python:3.12-slim`.
+The base system handles PDF questions by embedding the question into a
+vector and looking for similar-vector chunks of the PDF. That works fine
+for conceptual questions like *"how does NTT DATA approach materiality?"*
+but is bad at number questions like *"what's the Scope 1+2 emissions
+reduction target?"*. The answer to a number question often lives in one
+row of a giant KPI table, and that row's vector is drowned in the rest
+of the table.
+
+Concretely, on a 25-question benchmark I built (NTT DATA sustainability
+reports 2023 + 2024, 686 chunks):
+
+- Only **12.7 % of the chunks the base vector retriever returned were
+  actually relevant** (precision@5 = 0.127).
+- Hybrid search (vector blended with full-text trigram rank) did not
+  improve recall at all — same numbers, twice the latency.
+- Every query took **36-157 ms**, because each one has to embed the
+  question and run a vector similarity search.
+
+## What I changed
+
+Three things, in increasing order of difficulty:
+
+1. **SQL-as-a-tool retrieval.** During ingestion, an offline LLM pass
+   pulls every number out of the PDF chunks and writes them to a Postgres
+   table (`kpi_facts`) along with metric name, year, scope, etc. At query
+   time, the agent has a new tool — `sql_kpi_search` — that does a fuzzy
+   SQL match on the metric name. For specific-number questions it goes
+   there first; for conceptual questions it falls back to the existing
+   vector / hybrid search.
+2. **An evaluation framework.** Before this, you had no way to say
+   whether a change to the agent helped or hurt. I built a 25-question
+   benchmark with strict gold-chunk labels, a CLI runner, and an
+   LLM-as-judge for the open-ended answer-quality metrics.
+3. **Table-aware chunking.** The biggest single table in the PDF was a
+   37 000-character KPI block; the next biggest was a narrative TCFD
+   risk-disclosure table where individual rows are themselves 5-10 kB
+   of prose. Both kinds of "fat" chunks have useless embeddings. The
+   new ingestion path detects markdown tables, splits them into
+   row-groups capped by **both** a row count and a character budget,
+   and repeats the column headers on every piece. Max table chunk
+   dropped from 43 kB to ~24 kB; the corpus grew from 316 chunks to
+   328 for the same document. Implemented in `ingestion/chunker.py`
+   and covered by 22 unit tests in `tests/ingestion/test_chunker.py`.
+
+## The headline result
+
+Same 25 questions, base system (vector / hybrid) vs the new SQL tool,
+k = 5:
+
+| What we measure                          | Base system | My SQL tool | Change            |
+| ---------------------------------------- | :---------: | :---------: | :---------------: |
+| **Precision** (% of returned chunks that are relevant) | 12.7 %      | **26.4 %**  | **+108 %**        |
+| **Content-recall@5** (top 5 contains the answer text)  | 50.0 %      | **72.7 %**  | **+45 %**         |
+| **Multi-hop content-recall@5** (compare two KPIs)      | 66.7 %      | **100.0 %** | **perfect**       |
+| **Latency** (time per query)             | 36-157 ms   | **5 ms**    | **7-30× faster**  |
+
+The agent keeps all three retrievers and picks per-question. SQL is the
+right answer for KPI lookups but only knows about numbers the extractor
+caught; conceptual questions ("which framework certifies the targets?")
+still fall back to vector / hybrid. The eval framework reports the
+per-category breakdown so the trade-off is explicit, not hidden.
+
+## What "recall@5", "precision@5", "MRR" mean in plain English
+
+Retrieval quality is reported with five numbers throughout this README
+and the eval reports:
+
+| Term                    | Plain-English question it answers                                                                                                |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **recall@5** (strict)   | Of the *specific gold chunk IDs* labelled for this question, what fraction did the system put in its top 5?                      |
+| **content-recall@5**    | Did *any* of the top 5 chunks' text contain the answer keywords? — chunking-independent, robust to chunk-ID drift.               |
+| **precision@5**         | Of the 5 chunks the system returned, what fraction were the labelled gold IDs?                                                   |
+| **MRR**                 | How high up the list did the first correct chunk appear? 1.0 = always rank 1, 0.5 ≈ usually rank 2, etc.                         |
+| **latency**             | Wall-clock milliseconds per query, end-to-end through the API.                                                                   |
+
+`@5` just means "looking at the top 5 results"; you can run with a
+different `k`. Recall and precision pull in opposite directions, which
+is why a tool can be much more precise (less noise) and only slightly
+better on recall (less coverage) at the same time. The two recall
+numbers exist because chunk-ID-based metrics break when you change the
+chunker: a new chunking might find the same answer in *different*
+chunks, which looks like a regression under strict ID matching but is
+caught by content-recall.
 
 ---
 
-## Results: SQL-as-tool vs vector / hybrid
+## What I added
 
-Reproduced via `python -m eval.run_eval --strategy {vector,hybrid,sql} --k 5`
-against the 25-question benchmark on the NTT DATA Sustainability Report 2024 corpus.
+### 1. SQL-as-a-tool retrieval
 
-| Strategy           | recall@5 | precision@5 |  MRR  | avg latency |
-| ------------------ | :------: | :---------: | :---: | :---------: |
-| `vector` (upstream)|  0.455   |    0.173    | 0.540 |    47 ms    |
-| `hybrid` (upstream)|  0.455   |    0.173    | 0.540 |    98 ms    |
-| **`sql`** (new)    |  0.364   |  **0.255**  | 0.361 |   **6 ms**  |
+A new way for the agent to answer KPI questions: a Postgres table called
+`kpi_facts` that holds extracted numbers, and a `sql_kpi_search` tool the
+agent can call.
 
-**Where SQL wins (the intended trade-off):**
+- An offline script (`scripts/extract_kpi_facts.py`) runs the LLM over every
+  chunk that contains numbers and asks it to pull out
+  `{metric_name, value, unit, year, scope, category}` rows.
+- Each row keeps a foreign key back to its source chunk, so answers can
+  still cite the original prose.
+- The agent picks this tool first for specific-number questions, and falls
+  back to hybrid search for everything else.
 
-| Category     | n  | vector recall@5 | hybrid recall@5 | sql recall@5 |
-| ------------ | :-:| :-------------: | :-------------: | :----------: |
-| factoid      | 10 |      0.600      |      0.600      |    0.400     |
-| multi-hop    |  6 |      0.500      |      0.500      |  **0.583**   |
-| table-lookup |  6 |      0.167      |      0.167      |    0.083     |
+### 2. Retrieval evaluation framework
 
-- **SQL has the highest precision (0.255 vs 0.173)**: when it returns
-  something, it's relevant — there are no off-topic prose paragraphs in
-  `kpi_facts`.
-- **SQL is 8× faster than vector and 16× faster than hybrid** (6 ms vs
-  47–98 ms): no embedding round-trip, just a trigram-similar SELECT.
-- **SQL wins recall@5 on multi-hop (0.583 vs 0.500)**: comparing two related
-  KPIs (e.g. "Scope 1+2 vs Scope 3 reduction targets") is exactly what a
-  structured table is good at.
-- **SQL trails on factoid recall (0.400 vs 0.600)**: conceptual questions
-  (which framework certifies our targets? which standard guides materiality?)
-  are not numeric KPIs and were not extracted into `kpi_facts`. SQL coverage
-  is bounded by what the extractor surfaced — this is a real limitation, not
-  a tuning artefact.
-- **An honest negative result: hybrid offered no upside over pure vector
-  at this scale** (identical recall and MRR, 2× the latency). The micro-eval's
-  apparent hybrid advantage didn't survive a larger benchmark.
-- **Table-lookup is the hardest category for everyone.** The canonical
-  "FY2024 KPI table" gold chunk is ~37 k characters, so its embedding is
-  diluted (vector / hybrid miss it) and the LLM extractor often associates
-  facts with smaller, more specific neighbouring chunks (mismatching the
-  big-table gold). This is a real signal that the next improvement is
-  table-aware chunking, not a different retriever.
+A small benchmark + CLI runner that puts the agent's retrieval on a
+scorecard, so claims of improvement can be checked rather than trusted.
 
-Run artifacts in `eval/results/2026-06-23T11-49-*__*__k5.{md,json}`.
+- 25 questions (factoid / multi-hop / table-lookup / negative).
+- Metrics: `recall@k`, `precision@k`, `MRR`, `numeric_match`, plus an
+  optional LLM judge for `faithfulness` and `answer_relevance`.
+- Gold chunk IDs were bootstrapped by direct ILIKE-matching against the
+  raw chunk content — the bootstrap never reads `kpi_facts` and never
+  calls the agent, so the labels don't favour the SQL feature.
+- Reports are written to `eval/results/` as both markdown and JSON.
 
-### How the structured layer is built
+### 3. Table-aware chunking
 
-- `scripts/extract_kpi_facts.py` walks every chunk that contains numeric
-  hints (regex-pre-filtered to skip prose-only sections), prompts the LLM
-  for a strict JSON array of `{metric_name, value, unit, year, scope,
-  baseline_year, category}` tuples, validates each row (must contain a
-  digit, year ∈ [1990, 2100], category ∈ a small enum), and inserts into
-  `kpi_facts` with a foreign-key back to the source chunk.
-- The extraction pass on this corpus produced **96 facts across 16 chunks
-  in 10 categories** (emissions, waste, diversity, governance, supply_chain,
-  social, water, energy, financial, other) in roughly 12 minutes against a
-  local Ollama `qwen2.5:14b`.
-- The pass is intentionally noisy. The contribution is not that the table
-  is a perfect ground-truth (it isn't — the LLM can miss rows or pick
-  ambiguous metric names) but that *querying a noisy structured layer
-  beats fuzzy vector retrieval on lookup-style questions*. The eval
-  framework is what makes this claim auditable rather than vibes-based.
+The biggest single-chunk failure on the original benchmark was the 37 000-
+character "FY2024 KPI table". Its embedding was too unfocused for vector
+search to rank it. The chunker now handles markdown tables specially.
 
-### How the agent uses it
+- Detects pipe-syntax tables before any semantic splitting.
+- Splits each table into row groups capped by **both** a row count
+  (default 4) **and** a character budget (default 10 000) — the
+  character cap is what handles "narrative tables" like the TCFD
+  risk-disclosure blocks where one row is multiple paragraphs of prose.
+- Repeats the first three header rows on every chunk so the column
+  headers stay attached to the data.
+- Implemented in `ingestion/chunker.py`; 22 tests in
+  `tests/ingestion/test_chunker.py`.
 
-A new `sql_kpi_search` tool is registered with the Pydantic AI agent:
+Operationally, `scripts/rechunk_existing.py` lets you re-chunk an
+already-ingested document in place: it reads the parsed markdown back
+out of `documents.content`, runs the new chunker, re-embeds in
+throttled batches, and atomically swaps the chunks rows. This avoids
+re-running the most CPU-heavy step of ingestion (Docling parsing) when
+all you want to evaluate is a chunker change.
+
+### 4. Provider-pluggable LLM stack
+
+`OPENAI_BASE_URL` plumbing so the whole stack (chat agent, embeddings, KPI
+extraction, judge) can run against Ollama, OpenAI, Groq, vLLM, or any other
+OpenAI-compatible endpoint without code changes. Embedding dimension is
+configurable to match (768 for Ollama `nomic-embed-text`, 1536 for OpenAI
+`text-embedding-3-small`).
+
+### 5. Dev tooling
+
+- Makefile wrapper that ignores polluting shell env vars (`DB_USER`,
+  `DB_PASSWORD` etc. set by user shells were silently overriding `.env`).
+- Dockerfile pinned to the Python version `pyproject.toml` actually
+  requires; system graphics libraries added so Docling can render PDFs
+  inside `python:3.12-slim`.
+
+---
+
+## How it works
+
+### Architecture
 
 ```
-sql_kpi_search(query: str, year: int|None, category: str|None, limit: int)
-  → [{metric_name, value, unit, year, scope, baseline_year, category,
-      similarity, chunk_id, document_title, supporting_text}, ...]
+                              ┌──────────────────────────┐
+                              │  Streamlit UI  (:8501)   │
+                              └────────────┬─────────────┘
+                                           │
+                              ┌────────────▼─────────────┐
+                              │  FastAPI agent (:8058)   │
+                              │  - Pydantic AI runtime   │
+                              │  - tools: vector_search, │
+                              │           hybrid_search, │
+                              │           sql_kpi_search │
+                              └────────────┬─────────────┘
+                                           │
+                              ┌────────────▼─────────────┐
+                              │  Postgres (:6543)        │
+                              │  - documents, chunks     │
+                              │  - kpi_facts             │
+                              │  - pgvector + pg_trgm    │
+                              └──────────────────────────┘
 ```
 
-The system prompt instructs the agent to call `sql_kpi_search` *first* for
-specific quantitative KPI questions, falling back to `hybrid_search` for
-conceptual or multi-hop questions. The eval framework projects each SQL hit's
-`source_chunk_id` onto the standard chunk-level retrieval metrics, so SQL and
-vector hits are scored uniformly.
+### Where each piece lives
 
-### Note on chat-mode reliability
-
-`/chat` results are sensitive to the underlying LLM's tool-calling discipline.
-Smaller open-source models (e.g. `qwen2.5:14b` on Ollama) occasionally emit a
-free-text reply instead of a tool call, which manifests as silent retrieval drops
-even at temperature 0. Larger / commercial models (GPT-4-class, Llama 3.1 70B+)
-are dramatically more consistent. The deterministic `/search/sql` strategy
-above is unaffected by this and is the cleanest before/after measurement of the
-new feature.
-
----
-
-## Architecture
-
-Three services orchestrated via Docker Compose:
-
-| Service             | Tech                                                    | Role                                                              |
-| ------------------- | ------------------------------------------------------- | ----------------------------------------------------------------- |
-| `agent_api`         | Python 3.12 · FastAPI · Pydantic AI (`:8058`)           | Agent runtime; exposes retrieval, chat, and streaming endpoints   |
-| `agent_ui`          | Streamlit (`:8501`)                                     | Interactive chat UI                                               |
-| `postgres_pgvector` | Postgres 17 · pgvector · pg_trgm (host `:6543`)         | Document store, vector index, full-text trigram index, KPI facts  |
-
-**Agent tools:**
-
-| Tool              | What it does                                                                            |
-| ----------------- | --------------------------------------------------------------------------------------- |
-| `sql_kpi_search`  | **(new)** Trigram-matched metric-name lookup over the structured `kpi_facts` table      |
-| `vector_search`   | Semantic similarity search via pgvector cosine distance                                 |
-| `hybrid_search`   | Weighted blend of vector similarity and trigram text rank                               |
-| `get_document`    | Fetch a single document by id                                                           |
-| `list_documents`  | Paginated corpus listing                                                                |
-
-**Postgres surfaces:**
-
-| Surface                  | Purpose                                                                              |
-| ------------------------ | ------------------------------------------------------------------------------------ |
-| `documents`, `chunks`    | Source documents and their embedded chunks (pgvector + pg_trgm indexed)              |
-| `kpi_facts`              | LLM-extracted structured KPIs, FK-linked to the chunk they were derived from         |
-| `search_kpi_facts(...)`  | SQL function backing `sql_kpi_search`: trigram match + year / category filters       |
-| `match_chunks(...)`      | SQL function backing `vector_search`                                                 |
-| `hybrid_search(...)`     | SQL function backing `hybrid_search`                                                 |
+| Piece                  | File / function                                  | One-line role                                                  |
+| ---------------------- | ------------------------------------------------ | -------------------------------------------------------------- |
+| PDF parsing            | `ingestion/extract_files.py`                     | Docling -> markdown (tables become pipe-syntax tables).        |
+| Chunking               | `ingestion/chunker.py`                           | Splits markdown into chunks; table-aware splitter for tables.  |
+| Embeddings             | `ingestion/ingest.py` `aembed_chunks()`          | Sends chunk text to the configured embedding model.            |
+| KPI extraction         | `scripts/extract_kpi_facts.py`                   | LLM pulls `{metric, value, year, ...}` rows from chunks.       |
+| Agent + tools          | `agent/agent.py`, `agent/tools.py`               | Pydantic AI agent registering all tools.                       |
+| Vector search          | `agent/db_utils.py` `vector_search()`            | pgvector cosine similarity over `chunks.embedding`.            |
+| Hybrid search          | `agent/db_utils.py` `hybrid_search()`            | Vector + pg_trgm text rank, weighted.                          |
+| SQL KPI search         | `agent/db_utils.py` `sql_kpi_search()`           | Fuzzy text match on `kpi_facts.metric_name`.                   |
+| API                    | `agent/api.py`                                   | FastAPI routes; `/chat`, `/search/{vector,hybrid,sql}`.        |
+| Eval CLI               | `eval/run_eval.py`                               | Runs a strategy against `benchmark.yaml`, writes reports.      |
 
 ---
 
-## Quick Start
+## Results in detail
 
-### Prerequisites
+The summary table at the top of this README compares the base system's
+*best* retriever (vector and hybrid tied) against the new SQL tool.
+This section shows all three side by side, plus a per-category
+breakdown so you can see where each strategy is actually being used.
+
+All numbers come from the same 25 questions, k = 5, against a corpus
+of two NTT DATA Sustainability Reports (2023 + 2024 — 686 chunks total,
+328 of them produced by the new table-aware chunker on the 2024
+report). Reproduce with:
+
+```bash
+docker compose exec api python -m eval.run_eval --strategy vector --k 5
+docker compose exec api python -m eval.run_eval --strategy hybrid --k 5
+docker compose exec api python -m eval.run_eval --strategy sql    --k 5
+```
+
+### Overall scoreboard
+
+| Strategy            | recall@5 | content-recall@5 | precision@5 |  MRR  | latency |
+| ------------------- | :------: | :--------------: | :---------: | :---: | :-----: |
+| `vector` (upstream) |  0.185   |     0.500        |    0.127    | 0.273 |  42 ms  |
+| `hybrid` (upstream) |  0.185   |     0.500        |    0.127    | 0.273 | 157 ms  |
+| **`sql`** (new)     | **0.324**|   **0.727**      |  **0.264**  |**0.400**|**5 ms**|
+
+**Reading the row:** vector retrieves the exact labelled gold chunk
+18.5 % of the time, but a top-5 chunk *containing the answer text* 50 %
+of the time — so the answer is more findable than strict ID matching
+suggests. SQL gets both right far more often: 32 % strict, 73 % content,
+and twice the precision per returned chunk, in ~5 ms.
+
+### Per-category content-recall@5 (where each tool actually wins)
+
+Questions are split into categories on purpose, because the aggregate
+hides trade-offs.
+
+| Category       | # questions | vector | hybrid |    sql    | Best at                                                |
+| -------------- | :---------: | :----: | :----: | :-------: | :----------------------------------------------------- |
+| factoid        |  10         | 0.400  | 0.400  | **0.700** | **sql**: any single KPI lookup                         |
+| multi-hop      |   6         | 0.667  | 0.667  | **1.000** | **sql**: comparing two numeric KPIs (perfect recall)   |
+| table-lookup   |   6         | 0.500  | 0.500  |   0.500   | three-way tie — every retriever still misses half      |
+
+### Why SQL wins where it wins
+
+- **Precision** (0.264 vs 0.127, ~2×): everything in `kpi_facts` is a
+  number with a metric name. There's no off-topic prose, so what comes
+  back is usually relevant.
+- **Speed** (~5 ms vs 42-157 ms): a fuzzy SQL match on a small table is
+  much cheaper than embedding a question and scanning a vector index.
+- **Multi-hop perfect recall**: questions like *"is the Scope 1+2 cut
+  bigger than the Scope 3 cut by 2030?"* need two related numbers. A
+  structured table makes that one query; vector search has to hope
+  both numbers land in the top 5 of the same query.
+
+### Where SQL is weaker (and why)
+
+- **Conceptual factoids**: questions like *"which framework certifies
+  the targets?"* don't have numeric answers and aren't in `kpi_facts`.
+  SQL coverage is bounded by what the extractor pulled, so the agent
+  falls back to vector / hybrid for these.
+- **Table-lookup**: every retriever ties at 0.5 content-recall here.
+  These questions ("on the table, what's the value for X in row Y?")
+  need both keyword grounding (which the vector retriever provides) and
+  numeric grounding (which SQL provides), and ranking is the hard part
+  — the answer is in the top-N retrieved but not always at rank 1.
+
+### An honest negative result
+
+Hybrid retrieval — vector blended with full-text trigram rank — was
+supposed to beat plain vector retrieval. On this 25-question benchmark
+**it doesn't**: same recall, same MRR, twice the latency. An earlier
+5-question micro-eval suggested hybrid had an edge; the larger
+benchmark didn't back that up. Worth knowing.
+
+### How the gold labels were chosen
+
+To keep the eval honest, gold chunk IDs were chosen **without using the
+SQL feature**. `scripts/label_gold_ids.py` (and the in-place updater
+`scripts/relabel_gold_ids.py`) ILIKE-match each question's keywords and
+expected numbers directly against the `chunks` table. They never read
+`kpi_facts` and never invoke the agent, so the labels can't be biased
+toward what SQL happens to find.
+
+22 of 25 questions have strict gold IDs; the other 3 are intentional
+"unanswerable" negatives where the LLM judge grades whether the agent
+refuses cleanly. The `content-recall@5` column above is computed
+straight from chunk text and so doesn't rely on the gold IDs at all —
+it's the metric to trust when comparing chunkings, because chunk UUIDs
+change but answer text does not.
+
+### Chat-mode reliability caveat
+
+The `/chat` end-to-end strategy depends on the underlying LLM actually
+calling the tools it's offered. Small open-source models like
+`qwen2.5:14b` sometimes return a free-text reply instead of a tool call,
+even at temperature 0. Larger / commercial models are much more reliable.
+The deterministic `/search/sql` strategy above is not affected by this
+and gives the cleanest before/after picture of the SQL feature.
+
+---
+
+## Quick start
+
+### Requirements
 
 - Docker + Docker Compose
-- An LLM provider — **Ollama** (free, local) is the recommended path; OpenAI
-  and any OpenAI-compatible endpoint are also supported.
-- ~10 GB free disk if running models locally with Ollama.
+- An LLM provider — Ollama (free, local) is the simplest; OpenAI or any
+  OpenAI-compatible endpoint also works.
+- ~10 GB free disk if you run models locally with Ollama.
 
-### Boot the stack
+### 1. Boot the stack
 
 ```bash
-make up        # wraps `docker compose up -d` and unsets polluting shell env
-make status    # confirm containers are healthy and API /health is green
+make up       # docker compose up -d, with shell env vars neutralised
+make status   # confirm /health is green
 ```
 
-| What           | URL                                                  |
-| -------------- | ---------------------------------------------------- |
-| API            | http://localhost:8058 (Swagger at `/docs`)           |
-| UI             | http://localhost:8501                                |
-| Postgres       | `localhost:6543`  (postgres / postgres / vector_db)  |
+| What     | URL                                                |
+| -------- | -------------------------------------------------- |
+| API      | http://localhost:8058 (Swagger at `/docs`)         |
+| UI       | http://localhost:8501                              |
+| Postgres | `localhost:6543` (postgres / postgres / vector_db) |
 
-### Configure the LLM provider
+### 2. Configure the LLM
 
-Copy `.env.example` to `.env` and fill in values. Default `.env.example` is
-Ollama-friendly (set `OPENAI_BASE_URL=http://host.docker.internal:11434/v1`
-and use any string as the API key). For OpenAI, set a real `OPENAI_API_KEY`
-and leave `OPENAI_BASE_URL` unset.
+Copy `.env.example` to `.env` and fill in values. The default file is
+Ollama-friendly:
 
-### Ingest documents and build the KPI table
-
-```bash
-make ingest                                                # PDFs → chunks + embeddings
-docker compose exec api python -m scripts.extract_kpi_facts # chunks → kpi_facts
+```env
+OPENAI_BASE_URL=http://host.docker.internal:11434/v1
+OPENAI_API_KEY=ollama   # any non-empty string
+LLM_CHOICE=qwen2.5:14b
+EMBEDDING_MODEL=nomic-embed-text
 ```
 
-`KPI_EXTRACT_RESET=1` truncates `kpi_facts` first; `KPI_EXTRACT_RESUME=1` skips
-chunks that already have facts (useful to continue a partial run).
+For OpenAI: set a real `OPENAI_API_KEY` and leave `OPENAI_BASE_URL` unset.
 
-### Run the eval
+### 3. Ingest PDFs and build the KPI table
 
 ```bash
-# Retrieval-only strategies (deterministic, fast):
+# Drop PDFs into ./documents/, then:
+make ingest
+
+# Then extract KPIs from those chunks into kpi_facts:
+docker compose exec api python -m scripts.extract_kpi_facts
+```
+
+Useful flags on the extractor:
+
+- `KPI_EXTRACT_RESET=1` — truncate `kpi_facts` first.
+- `KPI_EXTRACT_RESUME=1` — skip chunks that already have facts (so you can
+  continue a partial run).
+
+### 4. Run the eval
+
+```bash
+# Retrieval-only (deterministic and fast):
 docker compose exec api python -m eval.run_eval --strategy vector --k 5
 docker compose exec api python -m eval.run_eval --strategy hybrid --k 5
 docker compose exec api python -m eval.run_eval --strategy sql    --k 5
@@ -220,27 +380,27 @@ docker compose exec api python -m eval.run_eval --strategy chat --k 5 --judge
 
 Reports land in `eval/results/<timestamp>__<strategy>__k<k>.{md,json}`.
 
-### Tear down
+### 5. Tear down
 
 ```bash
-make stop      # stop containers, keep the volume
-make down      # remove containers + volume
-make clean     # also remove built images (full reset)
+make stop    # stop containers, keep the data volume
+make down    # remove containers + data volume
+make clean   # also remove built images (full reset)
 ```
 
 ---
 
-## Endpoints
+## API endpoints
 
 ```
-GET  /health                   - health + DB + LLM client status
-POST /chat                     - single-turn chat (agent picks tools)
-POST /chat/stream              - SSE-streamed chat
-POST /search/vector            - direct vector search (bypasses the agent)
-POST /search/hybrid            - direct hybrid search (bypasses the agent)
-POST /search/sql               - direct structured KPI lookup (bypasses the agent)
-GET  /documents                - list ingested documents
-GET  /sessions/{session_id}    - conversation history for a session
+GET  /health                  - liveness + DB + LLM client status
+POST /chat                    - single-turn chat (agent picks tools)
+POST /chat/stream             - SSE-streamed chat
+POST /search/vector           - direct vector search (no agent)
+POST /search/hybrid           - direct hybrid search (no agent)
+POST /search/sql              - direct KPI lookup     (no agent)   [new]
+GET  /documents               - list ingested documents
+GET  /sessions/{session_id}   - conversation history
 ```
 
 Full schema at `http://localhost:8058/docs`.
@@ -251,19 +411,26 @@ Full schema at `http://localhost:8058/docs`.
 
 ```
 agent/                  FastAPI app, Pydantic AI agent, tools, DB helpers
-ingestion/              Docling-based PDF ingestion + chunking + embedding
-scripts/                One-off scripts (e.g. extract_kpi_facts.py)
+ingestion/              Docling PDF parsing + chunking + embedding
+  chunker.py              table-aware splitter (new)
+scripts/                One-off scripts
+  extract_kpi_facts.py    LLM-driven KPI extraction (new)
+  label_gold_ids.py       deterministic gold-label bootstrap (new)
+  relabel_gold_ids.py     in-place gold-ID refresh after re-chunking (new)
+  rechunk_existing.py     re-chunk + re-embed without re-running Docling (new)
+  bootstrap_gold_ids.py   hybrid-search candidate dump (new)
 sql/
-  schema.sql            Canonical schema (rebuilds full DB)
-  migrations/           Idempotent in-place migrations (e.g. 001_kpi_facts.sql)
-eval/
-  benchmark.yaml        Pre-registered micro-benchmark (questions + gold IDs)
-  metrics.py            Deterministic retrieval + answer-quality metrics
-  strategies.py         Adapters: vector / hybrid / sql / chat
-  judge.py              LLM-as-judge with disk-backed cache
-  run_eval.py           CLI runner
-  results/              Timestamped per-run reports (gitignored except .gitkeep)
-documents/              Source PDFs (DVC-friendly; see .gitignore)
+  schema.sql              full DB schema (rebuild from scratch)
+  migrations/             idempotent in-place migrations
+eval/                   Retrieval evaluation framework (new)
+  benchmark.yaml          25 questions + gold chunk IDs
+  metrics.py              recall@k, MRR, precision@k, numeric_match
+  strategies.py           vector / hybrid / sql / chat adapters
+  judge.py                LLM-as-judge with on-disk cache
+  run_eval.py             CLI runner
+  results/                timestamped per-run reports (gitignored)
+documents/              source PDFs
+tests/                  pytest suite
 ```
 
 ---
@@ -272,4 +439,4 @@ documents/              Source PDFs (DVC-friendly; see .gitignore)
 
 Same as the upstream project. See
 [serkanyasr/agentic_rag_project](https://github.com/serkanyasr/agentic_rag_project)
-for original license terms.
+for original terms.

@@ -35,8 +35,7 @@ questions:
     question: "By what percentage does NTT DATA aim to reduce Scope 1 and 2 GHG emissions by fiscal 2030, compared with what baseline year?"
     gold_chunk_keywords: ["68", "Scope 1", "fiscal 2021"]
     gold_chunk_ids:
-      - "e0ed8e3f-460d-4f53-93dd-6c8203e344d4"
-      - "066b8eda-71f4-4405-be8d-c2da1dfbec10"
+      - "ad263e0d-5eba-45c4-a5dc-f2b674517a75"
     expected_numbers: ["68", "2021", "2030"]
 
   - id: scope3-target-2030
@@ -44,8 +43,9 @@ questions:
     question: "What is NTT DATA's Scope 3 GHG emission reduction target by fiscal 2030?"
     gold_chunk_keywords: ["42", "Scope 3"]
     gold_chunk_ids:
-      - "e0ed8e3f-460d-4f53-93dd-6c8203e344d4"
-      - "066b8eda-71f4-4405-be8d-c2da1dfbec10"
+      - "ad263e0d-5eba-45c4-a5dc-f2b674517a75"
+      - "abfbf4e7-c9c6-4056-86fa-3b5d2e7429fb"
+      - "b2dff959-f422-46d3-aae4-1f93c8259a22"
     expected_numbers: ["42", "2030"]
 
   - id: sbti-framework
@@ -56,8 +56,10 @@ questions:
     # a4faf210 is the GHG-strategy narrative; e0ed8e3f is the
     # remuneration-tied-to-emissions chunk that explicitly cites SBTi.
     gold_chunk_ids:
-      - "a4faf210-ce57-4c47-b103-c81f878b193b"
-      - "e0ed8e3f-460d-4f53-93dd-6c8203e344d4"
+      - "ad263e0d-5eba-45c4-a5dc-f2b674517a75"
+      - "069451d3-0beb-493e-97f1-707182448634"
+      - "2d0fe244-3806-4b75-a9d1-6f5e10d83e9c"
+      - "187267d0-9a16-4590-bc0b-3cf0dcebb5ca"
     expected_numbers: []
 
   - id: paper-reduction-target
@@ -68,8 +70,11 @@ questions:
     # consumption: 40% reduction (from FY2020)". b69472f7 is the data
     # book chunk with the same row in raw tabular form.
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "b69472f7-8f0e-4947-954e-a19a5c5f4516"
+      - "cd88ebac-7c74-478a-93eb-6f8f0128b0ee"
+      - "1294a7f4-29ec-423a-8ab9-4e585272f315"
+      - "802571ea-d4b2-4944-b222-c329452e6c15"
+      - "2a838a62-f694-4224-aaf0-22b183069d21"
+      - "5682bd6b-9be8-43df-9ba8-60c35d7be8b8"
     expected_numbers: ["40", "2020"]
 
   - id: female-managers-target-2025
@@ -79,8 +84,10 @@ questions:
     # 3acdee72 (FY2024 table) and a77c4dae (women-in-leadership chunk)
     # both state the 15% by FY2025 target.
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "a77c4dae-0a9b-44af-a822-9595ca2a690d"
+      - "bb4074ff-f826-4742-b9dc-dcfff9d8a99d"
+      - "f6e1bd43-fe09-4ddf-bdac-04a3b5da2874"
+      - "a7504cd5-d1f0-4d03-bd3b-e0f4d95f34b6"
+      - "356a82e3-633a-47c9-ac30-3d114abf6e48"
     expected_numbers: ["15"]
 
   - id: childcare-leave-target
@@ -90,8 +97,11 @@ questions:
     # 3acdee72 (FY2024 table) lists the 100% childcare-leave target;
     # 2f78487a is the data-book chunk with the same row.
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "2f78487a-3763-4182-8ec8-8b308fd5ccdc"
+      - "23bbe22a-c3b5-460f-a8fc-cc530dac56eb"
+      - "b65ded63-82a7-4bcc-a354-0a2a17cc9ea9"
+      - "6ca7c753-ee64-46a3-8161-1765e3df7ff8"
+      - "30126cd7-56be-488b-b82c-e80c5a93760c"
+      - "e8ea7091-7ee9-4b92-b65c-68a545faf688"
     expected_numbers: ["100"]
 
   - id: external-hiring-fy2023
@@ -100,8 +110,8 @@ questions:
     gold_chunk_keywords: ["external hiring", "45.6"]
     # ILIKE matched only two chunks for "external hiring" + "45.6".
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "a77c4dae-0a9b-44af-a822-9595ca2a690d"
+      - "a7504cd5-d1f0-4d03-bd3b-e0f4d95f34b6"
+      - "356a82e3-633a-47c9-ac30-3d114abf6e48"
     expected_numbers: ["45.6"]
 
   - id: human-rights-violations-fy2023
@@ -111,8 +121,11 @@ questions:
     # 3acdee72 (FY2024 table) and ca0607a3 (the human-rights /
     # accessibility narrative chunk) both report the FY2023 count of 1.
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "ca0607a3-4b1e-4802-8ea3-0f849eb0c96e"
+      - "1497c0eb-ccdc-4119-a324-4ba083a84886"
+      - "82957cac-8f78-48bd-bc79-15a56b439302"
+      - "f6568e82-13db-419e-8dc6-1c8b5ea2a07d"
+      - "a832cc73-01c0-473a-bacd-c01c13c7e913"
+      - "114599a2-e40e-4209-a2a1-7f584cd2141e"
     expected_numbers: ["1"]
 
   - id: turnover-rate-fy2023
@@ -121,8 +134,8 @@ questions:
     gold_chunk_keywords: ["turnover", "3.0"]
     # ILIKE matched only two chunks for "turnover" + "3.0".
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "2f78487a-3763-4182-8ec8-8b308fd5ccdc"
+      - "94eedb22-a06f-4c03-a79b-572599e5c1f0"
+      - "b7687fd4-cd92-45e3-a55d-b3726a7c688f"
     expected_numbers: ["3.0"]
 
   - id: materiality-framework
@@ -133,8 +146,11 @@ questions:
     # determination section. 72110c1e is a scope-of-coverage chunk that
     # also references GRI alignment.
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "72110c1e-b946-44f8-8ece-4b7f5e1e17cd"
+      - "7c581884-b8d3-49fe-9b94-6916bb5d09a9"
+      - "b45e337b-063a-4f32-89ad-21ca5de303f3"
+      - "733a1aa4-ff51-4e63-89a8-fea1480f939e"
+      - "905be071-f4ba-483b-9054-5cac7e90f4e3"
+      - "2d7ea2ea-bc7f-419a-9f5f-b768783c850e"
     expected_numbers: []
 
   # ---------------------------------------------------------------
@@ -146,7 +162,11 @@ questions:
     question: "By what year does NTT DATA plan to reach net-zero emissions for Scope 1 and 2, and by what year for all scopes (Scope 1, 2, and 3)?"
     gold_chunk_keywords: ["net-zero"]
     gold_chunk_ids:
-      - "066b8eda-71f4-4405-be8d-c2da1dfbec10"
+      - "97484aea-5742-47fb-8039-23ff53c17ffd"
+      - "7a78bbf9-836f-430a-af80-028c78bde962"
+      - "069451d3-0beb-493e-97f1-707182448634"
+      - "2d0fe244-3806-4b75-a9d1-6f5e10d83e9c"
+      - "b2dff959-f422-46d3-aae4-1f93c8259a22"
     expected_numbers: ["2035", "2040"]
 
   - id: scope-reduction-comparison
@@ -157,8 +177,11 @@ questions:
     # Scope 3: Reduce by 42%". e0ed8e3f also contains both percentages
     # in the remuneration-tied-to-emissions context.
     gold_chunk_ids:
-      - "066b8eda-71f4-4405-be8d-c2da1dfbec10"
-      - "e0ed8e3f-460d-4f53-93dd-6c8203e344d4"
+      - "ad263e0d-5eba-45c4-a5dc-f2b674517a75"
+      - "1b704083-d897-407e-a465-d0def484104e"
+      - "4a9e4c91-5e0a-41bc-ac49-6871a3f59f95"
+      - "938bb7bd-c8f6-464d-ad5d-067bda959c29"
+      - "abfbf4e7-c9c6-4056-86fa-3b5d2e7429fb"
     expected_numbers: ["68", "42"]
 
   - id: female-managers-progress
@@ -168,8 +191,9 @@ questions:
     # Both 3acdee72 and a77c4dae contain "10.8%" achieved + "15%" target
     # adjacent to the female-managers row.
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "a77c4dae-0a9b-44af-a822-9595ca2a690d"
+      - "bb4074ff-f826-4742-b9dc-dcfff9d8a99d"
+      - "a7504cd5-d1f0-4d03-bd3b-e0f4d95f34b6"
+      - "356a82e3-633a-47c9-ac30-3d114abf6e48"
     expected_numbers: ["10.8", "15"]
 
   - id: waste-recycling-types
@@ -179,8 +203,9 @@ questions:
     # 3acdee72 is the FY2024 table (general/industrial 99%, construction
     # 87%). 9c44f330 is the surrounding prose chunk.
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "9c44f330-5aa3-4afb-b1f0-2b176075947b"
+      - "8fa6e24a-3b94-4be5-8a3f-4d170dd65c55"
+      - "62da2330-fdac-407d-aac8-25ac18276367"
+      - "92418448-ef65-4365-bb82-9a4476d3653a"
     expected_numbers: ["99", "87"]
 
   - id: female-directors-progress
@@ -189,8 +214,8 @@ questions:
     gold_chunk_keywords: ["female directors"]
     # ILIKE matched only two chunks for "female directors" + "22.7" + "25".
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "a77c4dae-0a9b-44af-a822-9595ca2a690d"
+      - "a7504cd5-d1f0-4d03-bd3b-e0f4d95f34b6"
+      - "356a82e3-633a-47c9-ac30-3d114abf6e48"
     expected_numbers: ["22.7", "25"]
 
   - id: scope12-vs-scope3-emissions-fy2023
@@ -200,7 +225,11 @@ questions:
     # 3acdee72 (FY2024 table) is the only chunk that contains the FY2023
     # tabular row with "Scope 1: 39,507 t-CO2 / Scope 2: 307,009 t-CO2".
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "20cae7de-5d35-403b-bdef-deb7f717dd45"
+      - "20c697f2-7ff8-4eca-bf70-5593893491d5"
+      - "26222ed6-cf3d-4936-8d2f-6461b6088338"
+      - "19cc85e4-aea6-4437-945e-0001d33277ba"
+      - "069451d3-0beb-493e-97f1-707182448634"
     expected_numbers: ["39,507", "307,009"]
 
   # ---------------------------------------------------------------
@@ -212,8 +241,11 @@ questions:
     question: "What is NTT DATA's target for general and industrial waste recycling rate, and what was the fiscal 2023 achievement?"
     gold_chunk_keywords: ["waste", "recycling", "99"]
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "9c44f330-5aa3-4afb-b1f0-2b176075947b"
+      - "21e82de6-763a-40a0-bcfb-03d375e39440"
+      - "cb6388ee-ec2e-48bb-868b-af2f5e5889bc"
+      - "07b1ccea-52d6-46de-a264-12035c835c96"
+      - "455c3931-deaa-4435-9fe7-503b803c29c9"
+      - "1f28c951-209b-4bd1-a07b-c9e65237b771"
     expected_numbers: ["99"]
 
   - id: remote-working-fy2023
@@ -223,8 +255,10 @@ questions:
     # 3acdee72 (FY2024 table) and 2f78487a (data book) both contain
     # the "Ratio of remote working" row with 63.2% achieved.
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "2f78487a-3763-4182-8ec8-8b308fd5ccdc"
+      - "2ba05705-ebb3-490f-be15-0ad6ecc77f87"
+      - "4ff0e8ff-a9d7-4c8f-ae25-3b3d9940534f"
+      - "b7687fd4-cd92-45e3-a55d-b3726a7c688f"
+      - "5ace50aa-aa25-4cb3-b730-f6058309d5e8"
     expected_numbers: ["63.2"]
 
   - id: bribery-violations-fy2023
@@ -233,8 +267,11 @@ questions:
     gold_chunk_keywords: ["anti-competitive"]
     # 3acdee72 (FY2024 table) and 900528e8 (compliance reports detail).
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "900528e8-9aa2-414d-8bc2-63c3c6c3390a"
+      - "fcab2e01-67af-4796-93f5-094f2bf725bd"
+      - "5f9623c5-096e-410e-bb8e-aa3275377b00"
+      - "064a5190-9049-4586-8f4d-48fd3ed2ede0"
+      - "bdca40b9-8887-4db9-a538-0f8719707185"
+      - "a6f8104d-c052-4566-abd3-0518ba07a965"
     expected_numbers: ["0"]
 
   - id: compliance-training-target
@@ -244,7 +281,10 @@ questions:
     # 3acdee72 lists the "Compliance IBT participation rate -> 100%"
     # target row directly.
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "a0021356-c862-4041-a1ec-f085657d24b3"
+      - "b192a03b-91ad-447e-998e-860360dc543b"
+      - "fdca8f2b-f055-4c7d-921a-7b5896b74c57"
+      - "58315fd8-1150-47f8-b86d-6318e2abc3ac"
     expected_numbers: ["100"]
 
   - id: workshop-participation-target
@@ -254,7 +294,10 @@ questions:
     # 3acdee72 lists the workshop / external-support participation
     # target of 80% under the FY2024 indicators column.
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
+      - "4ceac31c-2d92-4af9-9c9d-7017fc883b7b"
+      - "116f38cb-c023-4b44-9802-f49c098dec65"
+      - "4e3ab244-7a72-4744-92ab-29e80b2f2256"
+      - "e84b99e6-d5c1-4e4a-8e41-d33f508d5c1b"
     expected_numbers: ["80"]
 
   - id: supplier-engagement-fy2023
@@ -264,8 +307,11 @@ questions:
     # 3acdee72 (FY2024 table) and a0d07cd7 (supplier-engagement
     # narrative) both report the 100% direct-communication achievement.
     gold_chunk_ids:
-      - "3acdee72-676b-4359-9dbd-09350c61a625"
-      - "a0d07cd7-bd0b-4e00-9513-fc633ebd9057"
+      - "96205fd3-7e72-4475-98eb-b5f641247471"
+      - "5331e4b3-7d64-44f3-ba2f-a3d1600c256b"
+      - "6865a883-8975-4411-b706-210bfed6514e"
+      - "fe46278e-a9be-45a2-94b7-4a668bf0173d"
+      - "23276383-8f91-4003-89c5-5ec97b038dcd"
     expected_numbers: ["100"]
 
   # ---------------------------------------------------------------

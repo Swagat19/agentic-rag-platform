@@ -18,5 +18,9 @@ documents_smoke/
 eval/results/*
 !eval/results/.gitkeep
 
+# Scratch artefacts from the gold-label bootstrap tools.
+eval/_gold_id_proposals.yaml
+eval/_bootstrap_candidates.yaml
+
 # OS / editor noise
 .DS_Store

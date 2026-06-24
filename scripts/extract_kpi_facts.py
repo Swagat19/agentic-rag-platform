@@ -337,6 +337,8 @@ async def main() -> int:
         chunks = await fetch_candidate_chunks(conn, limit=limit, resume=resume)
         logger.info("Candidate chunks with numeric hints: %d", len(chunks))
 
+        sleep_ms = int(os.getenv("KPI_EXTRACT_SLEEP_MS", "0"))
+
         total_inserted = 0
         for idx, chunk in enumerate(chunks, start=1):
             facts = await extract_from_chunk(client, model, chunk)
@@ -354,6 +356,10 @@ async def main() -> int:
                 len(facts),
                 inserted,
             )
+            # Optional cool-down between calls; keeps a long single-thread
+            # Ollama job from pinning the CPU at 100% the whole time.
+            if sleep_ms > 0 and idx < len(chunks):
+                await asyncio.sleep(sleep_ms / 1000)
 
         logger.info("Done. Inserted %d facts total.", total_inserted)
     finally:
